@@ -104,6 +104,7 @@
         "resolver.js",
         "chart-markers.js",
         "title-feed.js",
+        "panel-i18n.js",
         "content.js",
         "warm-links.js",
         "forge-core.js",

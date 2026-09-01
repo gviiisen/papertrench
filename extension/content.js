@@ -10,6 +10,7 @@
   const E = window.PaperEngine;
   const S = window.PaperTrenchSites;
   const Q = window.PaperQuote;
+  const panelI18n = window.PTPanelI18n || null;
   // The share-card module (pnlcard.js) — the SAME painter and source builders
   // the dashboard composer uses, so the in-page Flex composer can never show
   // different numbers than the dashboard would for the same result.
@@ -62,6 +63,7 @@
   let lastPollAt = 0;
   let pollInFlight = false;
   let posEls = null;            // cached position-card nodes, updated in place
+  let panelI18nController = null;
   let posOrderEls = null;       // cached TP/SL section nodes on that card
   let thesisEls = null;         // cached thesis card state
   let thesisEditing = false;
@@ -4731,6 +4733,127 @@
     }
     .pt-footer a:hover { color: var(--pt-amber); border-color: var(--pt-amber); }
 
+    /* ---------------- Debot venue skin ----------------
+     * Debot's own terminal is flat, quiet and information-dense: near-black
+     * surfaces, hairline separators, restrained green/red direction cues and
+     * almost no glow. Scope the adaptation to Debot so venue-specific visual
+     * language never leaks into Axiom, Padre, GMGN or the other skins. */
+    .pt-box.pt-debot {
+      --pt-void: #0f1013;
+      --pt-bg: #111216;
+      --pt-surface: #17181d;
+      --pt-raised: #202228;
+      --pt-line: #292b32;
+      --pt-line-2: #353840;
+      --pt-text: #e7e8ec;
+      --pt-dim: #92959e;
+      --pt-faint: #666a74;
+      --pt-amber: #00d6a3;
+      --pt-amber-soft: rgba(0, 214, 163, 0.10);
+      --pt-green: #00d6a3;
+      --pt-green-soft: rgba(0, 214, 163, 0.10);
+      --pt-red: #ff4065;
+      --pt-red-soft: rgba(255, 64, 101, 0.11);
+      background: #111216;
+      border: 1px solid #292b32;
+      border-radius: 12px;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: 0 16px 44px rgba(0, 0, 0, 0.42);
+    }
+    .pt-box.pt-debot::before { display: none; }
+    .pt-box.pt-debot .pt-banner {
+      justify-content: flex-start;
+      padding: 7px 12px;
+      color: #777b84;
+      background: #15161a;
+      border-bottom-color: #292b32;
+      font-size: 9px;
+      letter-spacing: 1px;
+    }
+    .pt-box.pt-debot .pt-banner::after { display: none; }
+    .pt-box.pt-debot .pt-header { padding: 9px 11px; gap: 8px; }
+    .pt-box.pt-debot .pt-icon {
+      width: 26px; height: 26px; border-radius: 8px;
+      color: #00d6a3; background: #191a1f;
+      border-color: #292b32; box-shadow: none;
+    }
+    .pt-box.pt-debot .pt-title { font-size: 13px; font-weight: 700; }
+    .pt-box.pt-debot .pt-hbtn { width: 24px; height: 24px; border-radius: 6px; }
+    .pt-box.pt-debot .pt-body { padding: 11px 12px 12px; }
+    .pt-box.pt-debot .pt-token-row { margin-bottom: 10px; align-items: center; }
+    .pt-box.pt-debot .pt-token > div:first-child { font-size: 16px; font-weight: 700; }
+    .pt-box.pt-debot .pt-mint {
+      margin-top: 3px; padding: 1px 0; color: #777b84;
+      background: transparent; border: 0; border-radius: 0;
+    }
+    .pt-box.pt-debot .pt-label {
+      margin: 9px 0 6px; color: #777b84;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+      text-transform: none;
+    }
+    .pt-box.pt-debot .pt-presets {
+      padding: 0; gap: 6px; background: transparent; border: 0;
+    }
+    .pt-box.pt-debot .pt-preset {
+      padding: 9px 3px; border: 1px solid #343740; border-radius: 9px;
+      background: transparent; color: #00d6a3; font-weight: 650;
+    }
+    .pt-box.pt-debot .pt-preset:hover { background: rgba(0, 214, 163, 0.06); border-color: #00a982; }
+    .pt-box.pt-debot .pt-preset.sel {
+      color: #00d6a3; background: rgba(0, 214, 163, 0.10);
+      border-color: #00b88c; box-shadow: none;
+    }
+    .pt-box.pt-debot .pt-costs { margin-top: 6px; }
+    .pt-box.pt-debot .pt-costs span {
+      padding: 2px 0; background: transparent; border: 0; border-radius: 0;
+    }
+    .pt-box.pt-debot .pt-buy {
+      margin-top: 8px; padding: 11px; border: 1px solid rgba(0, 214, 163, 0.28);
+      border-radius: 9px; background: #0b493d; color: #00d6a3;
+      font-size: 13px; font-weight: 700; letter-spacing: 0;
+      box-shadow: none;
+    }
+    .pt-box.pt-debot .pt-buy::after { display: none; }
+    .pt-box.pt-debot .pt-buy:hover { filter: none; background: #0d594a; box-shadow: none; }
+    .pt-box.pt-debot .pt-custom,
+    .pt-box.pt-debot .pt-limit-row input,
+    .pt-box.pt-debot .pt-limit-row button,
+    .pt-box.pt-debot .pt-editor {
+      background: #191a1f; border-color: #30323a; box-shadow: none;
+    }
+    .pt-box.pt-debot .pt-pos {
+      margin-top: 10px; padding: 8px 10px;
+      background: #15161a; border-color: #292b32; border-radius: 10px;
+      animation: none;
+    }
+    .pt-box.pt-debot .pt-pos .row { padding: 6px 0; }
+    .pt-box.pt-debot .pt-pos .row + .row { border-top-color: #24262c; }
+    .pt-box.pt-debot .pt-pos .pnl {
+      padding: 7px 9px; min-height: auto; border-radius: 8px;
+      font-size: 18px; line-height: 1.3;
+    }
+    .pt-box.pt-debot .pt-ledger {
+      gap: 0; padding-top: 6px; border-top: 1px solid #292b32;
+    }
+    .pt-box.pt-debot .pt-led {
+      padding: 5px 4px; background: transparent; border: 0; border-radius: 0;
+    }
+    .pt-box.pt-debot .pt-led .k { font-size: 8px; letter-spacing: 0.35px; }
+    .pt-box.pt-debot .pt-led .v { font-size: 10.5px; }
+    .pt-box.pt-debot .pt-sell-row { gap: 6px; }
+    .pt-box.pt-debot .pt-sell {
+      padding: 9px 2px; color: #ff4065; background: transparent;
+      border: 1px solid rgba(255, 64, 101, 0.65); border-radius: 9px;
+      box-shadow: none;
+    }
+    .pt-box.pt-debot .pt-sell:hover { color: #ff6b86; background: rgba(255, 64, 101, 0.08); box-shadow: none; }
+    .pt-box.pt-debot .pt-okind,
+    .pt-box.pt-debot .pt-opct { background: transparent; border-color: #343740; }
+    .pt-box.pt-debot .pt-okind-on { color: #00d6a3; background: rgba(0, 214, 163, 0.08); border-color: #00a982; }
+    .pt-box.pt-debot .pt-footer { padding: 7px 12px; background: #111216; }
+    .pt-box.pt-debot .pt-resize { color: #555963; }
+
     /* ---------------- semantic colors ---------------- */
 
     .pt-green { color: var(--pt-green); }
@@ -5414,6 +5537,14 @@
     els.resize = shadow.getElementById('pt-resize');
 
     bindUI();
+    if (panelI18n && typeof panelI18n.start === 'function') {
+      if (panelI18nController) panelI18nController.disconnect();
+      panelI18nController = panelI18n.start(shadow);
+      onMountCleanup(() => {
+        if (panelI18nController) panelI18nController.disconnect();
+        panelI18nController = null;
+      });
+    }
     renderAll();
     applyOverlaySize();
   }
@@ -6168,6 +6299,9 @@
 
   function renderAll() {
     if (contextDead || !shadow) return;
+    if (els.box && els.box.classList) {
+      els.box.classList.toggle('pt-debot', Boolean(site && site.id === 'debot'));
+    }
     applyFocusMode();
     renderHeader();
     renderBalance();

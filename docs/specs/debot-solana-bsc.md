@@ -35,6 +35,15 @@ address.
 - The two cash accounts are isolated. A BSC fill cannot debit or credit SOL,
   and a Solana fill cannot debit or credit BNB.
 - Every fill, position, and closed round records its chain and native currency.
+
+## Debot panel presentation
+
+- The in-page panel shares the dashboard `EN` / `CN` locale choice. With no
+  saved choice, it follows the page or browser language; changing the dashboard
+  locale updates open trading tabs through extension storage.
+- Debot alone receives a venue-matched visual skin: flat near-black surfaces,
+  hairline separators, restrained green/red direction cues, and no decorative
+  amber rim, sheen, or action-button glow. Other venue themes are unchanged.
 - Mixed-chain position summaries show one result per currency; SOL and BNB are
   never added into a fabricated total.
 
