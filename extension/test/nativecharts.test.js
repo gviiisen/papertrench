@@ -204,6 +204,7 @@ function runBridge(opts = {}) {
   // ---- Debot visible Lightweight Charts series behind #chart React fiber ----
   const debotAppliedMarkers = [];
   const debotPriceLines = [];
+  let debotMarkerWrites = 0;
   function makeDebotSeries() {
     return {
       seriesType: () => 'Candlestick',
@@ -211,6 +212,7 @@ function runBridge(opts = {}) {
       setData() {},
       update() {},
       setMarkers(markers) {
+        debotMarkerWrites += 1;
         debotAppliedMarkers.length = 0;
         debotAppliedMarkers.push(...markers);
       },
@@ -404,6 +406,7 @@ function runBridge(opts = {}) {
     mountGmgn: () => { gmgnMounted = true; },
     remountGmgn: () => { gmgnChart = makeGmgnChart(); },
     debotMarkers: debotAppliedMarkers,
+    debotMarkerWrites: () => debotMarkerWrites,
     debotLines: debotPriceLines,
     debotSeries: () => debotSeries,
     remountDebot: () => { debotSeries = makeDebotSeries(); attachDebotFiber(); },
@@ -540,6 +543,28 @@ test('Debot 5s uses the actively updating candlestick when a stale series appear
   const buy = env.debotMarkers.find((marker) => marker.text === 'B');
   assert.equal(buy?.color, '#FACC15', 'the visible series must receive the yellow paper buy style');
   assert.equal(buy?.size, 2, 'the visible series must receive the larger paper buy marker');
+});
+
+test('Debot 5s candle refreshes do not repaint unchanged native marker circles', () => {
+  const env = runBridge({ debot: true });
+  env.runTimers();
+  const series = env.debotSeries();
+  const bars = [
+    { time: 1_800_000_000, open: 4_600_000, high: 4_700_000, low: 4_500_000, close: 4_643_000 },
+  ];
+  series.setData(bars);
+  series.setMarkers([
+    { time: 1_800_000_000, position: 'aboveBar', color: '#00aa88', shape: 'circle', text: 'wallet' },
+  ]);
+  const writesAfterMarkers = env.debotMarkerWrites();
+
+  for (let i = 0; i < 6; i += 1) {
+    series.setData([{ ...bars[0], close: bars[0].close + i }]);
+  }
+
+  assert.equal(env.debotMarkerWrites(), writesAfterMarkers,
+    'five-second candle data may change without clearing and repainting every native circle');
+  assert.equal(env.debotMarkers.length, 1, 'the native circle remains continuously installed');
 });
 
 test('Debot average lines use Lightweight price lines and recover after chart remount', () => {

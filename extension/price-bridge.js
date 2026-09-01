@@ -2766,7 +2766,6 @@
         try {
           activateDebotSeries(state);
           noteDebotBars(state, bars);
-          applyDebotMarkers(state);
           syncDebotAverageLines();
         } catch (_) {}
         return result;
