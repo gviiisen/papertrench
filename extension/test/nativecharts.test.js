@@ -589,6 +589,32 @@ test('Debot periodic chart probes do not repaint unchanged marker circles every 
   assert.equal(env.debotMarkers.length, 2, 'the native and paper circles remain continuously installed');
 });
 
+test('Debot ignores semantically identical native marker batches on untraded charts', () => {
+  const env = runBridge({ debot: true });
+  env.runTimers();
+  const series = env.debotSeries();
+  const nativeBatch = () => ([
+    { time: 1_800_000_000, position: 'belowBar', color: '#00aa88', shape: 'circle', text: 'B' },
+    { time: 1_800_000_005, position: 'aboveBar', color: '#ee4466', shape: 'circle', text: 'wallet' },
+  ]);
+  series.setMarkers(nativeBatch());
+  const writesAfterFirstBatch = env.debotMarkerWrites();
+
+  for (let i = 0; i < 6; i += 1) series.setMarkers(nativeBatch());
+
+  assert.equal(env.debotMarkerWrites(), writesAfterFirstBatch,
+    'equivalent one-second site batches must not reinstall every circle');
+  assert.equal(env.debotMarkers.length, 2, 'the unchanged native circles remain continuously installed');
+  assert.equal(env.debotMarkers[0].color, '#FACC15', 'the deduplicated B marker keeps its yellow style');
+
+  const changedBatch = nativeBatch();
+  changedBatch[1].text = 'wallet changed';
+  series.setMarkers(changedBatch);
+  assert.equal(env.debotMarkerWrites(), writesAfterFirstBatch + 1,
+    'a real marker content change must still reach the chart exactly once');
+  assert.equal(env.debotMarkers[1].text, 'wallet changed');
+});
+
 test('Debot average lines use Lightweight price lines and recover after chart remount', () => {
   const env = runBridge({ debot: true });
   env.runTimers();

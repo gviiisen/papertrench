@@ -2720,6 +2720,17 @@
     return out;
   }
 
+  function debotMarkerSignature(markers) {
+    try {
+      return JSON.stringify(markers, (key, value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+        const ordered = {};
+        for (const name of Object.keys(value).sort()) ordered[name] = value[name];
+        return ordered;
+      });
+    } catch (_) { return null; }
+  }
+
   function applyDebotMarkers(state) {
     if (!state || !state.series) return false;
     const siteMarkers = state.siteMarkers.map((marker) => {
@@ -2728,8 +2739,11 @@
     });
     const merged = [...siteMarkers, ...debotPaperMarkers(state)]
       .sort((a, b) => (debotTimeSec(a.time) || 0) - (debotTimeSec(b.time) || 0));
+    const signature = debotMarkerSignature(merged);
+    if (signature !== null && signature === state.markerSignature) return true;
     try {
       state.originalSetMarkers.call(state.series, merged);
+      state.markerSignature = signature;
       return true;
     } catch (_) { return false; }
   }
@@ -2747,6 +2761,7 @@
         series,
         siteMarkers: [],
         barTimes: [],
+        markerSignature: null,
         originalSetMarkers: series.setMarkers,
         originalSetData: series.setData,
         originalUpdate: series.update,
