@@ -4263,7 +4263,6 @@
 
     const debotState = ensureDebotSeries();
     if (debotState) {
-      if (debotFillPayloads.size) applyDebotMarkers(debotState);
       if (debotLineSpec && debotLineSpec.enabled) syncDebotAverageLines();
     }
 

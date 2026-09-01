@@ -567,6 +567,28 @@ test('Debot 5s candle refreshes do not repaint unchanged native marker circles',
   assert.equal(env.debotMarkers.length, 1, 'the native circle remains continuously installed');
 });
 
+test('Debot periodic chart probes do not repaint unchanged marker circles every second', () => {
+  const env = runBridge({ debot: true });
+  env.runTimers();
+  const series = env.debotSeries();
+  series.setData([
+    { time: 1_800_000_000, open: 4_600_000, high: 4_700_000, low: 4_500_000, close: 4_643_000 },
+  ]);
+  series.setMarkers([
+    { time: 1_800_000_000, position: 'aboveBar', color: '#00aa88', shape: 'circle', text: 'wallet' },
+  ]);
+  env.send('debot-marker', {
+    fillId: 'fill-no-flash', ts: 1_800_000_000_000, side: 'buy', text: 'PT Buy 0.1 BNB',
+  });
+  const writesAfterFill = env.debotMarkerWrites();
+
+  for (let i = 0; i < 6; i += 1) env.runTimers();
+
+  assert.equal(env.debotMarkerWrites(), writesAfterFill,
+    'the one-second probe may inspect the chart but must not reinstall unchanged marker circles');
+  assert.equal(env.debotMarkers.length, 2, 'the native and paper circles remain continuously installed');
+});
+
 test('Debot average lines use Lightweight price lines and recover after chart remount', () => {
   const env = runBridge({ debot: true });
   env.runTimers();
