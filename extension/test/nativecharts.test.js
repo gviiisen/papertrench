@@ -240,6 +240,16 @@ function runBridge(opts = {}) {
   }
   attachDebotFiber();
   let debotVisible = Boolean(opts.debot);
+  const debotVisiblePrice = Number(opts.debotVisiblePrice);
+  const debotPriceParent = {
+    innerText: debotVisiblePrice > 0 ? `Price $${debotVisiblePrice}` : '',
+    parentElement: null,
+  };
+  const debotPriceNode = {
+    textContent: debotVisiblePrice > 0 ? `$${debotVisiblePrice}` : '',
+    parentElement: debotPriceParent,
+    getAttribute: (name) => (name === 'title' && debotVisiblePrice > 0 ? String(debotVisiblePrice) : null),
+  };
 
   // ---- optional screener-row DOM for the chip occlusion tests (O-22) ----
   let panelOverChip = false;
@@ -282,6 +292,7 @@ function runBridge(opts = {}) {
     },
     querySelectorAll: (sel) => {
       const s = String(sel);
+      if (debotVisible && s === '[title]' && debotVisiblePrice > 0) return [debotPriceNode];
       if (axiomVisible && s.includes('iframe[id^="tradingview_"]')) return [axiomIframe];
       if (rowDomNodes && s === 'a.testrow') return [rowDomNodes.anchor];
       return [];
@@ -457,6 +468,35 @@ test('Debot merges paper fills with its existing B/S markers and emits visible-s
   assert.equal(paperBuy.size, 2, 'paper buy circles are larger than the chart default');
   assert.ok(env.emitted.some((m) => m.type === 'tick' && m.payload?.source === 'debot-chart-bar'),
     'the visible candlestick series supplies live chart ticks');
+});
+
+test('a fresh Debot chart bar outranks a divergent DOM price fallback for live P&L', () => {
+  const env = runBridge({ debot: true, debotVisiblePrice: 0.0003518 });
+  env.send('paper-axis', {
+    mint: '0xeb9e768c42d6f5b08d34980c6f721494372a7777',
+    symbol: '彩礼币',
+  });
+  env.runTimers();
+  env.emitted.length = 0;
+  env.advance(3000); // past the DOM fallback's duplicate-suppression window
+
+  env.debotSeries().setData([
+    { time: 1_800_000_000, open: 240_000, high: 250_000, low: 235_000, close: 244_600 },
+  ]);
+  env.runTimers();
+
+  const ticks = env.emitted.filter((message) => message.type === 'tick');
+  assert.ok(ticks.some((message) => message.payload?.source === 'debot-chart-bar'),
+    'the visible candle close must reach the live P&L path');
+  assert.equal(ticks.some((message) => message.payload?.source === 'debot-dom-price'), false,
+    'the DOM title is fallback-only and must not overwrite a fresh chart close');
+
+  env.emitted.length = 0;
+  env.advance(15_001);
+  env.runTimers();
+  assert.ok(env.emitted.some((message) => message.type === 'tick'
+    && message.payload?.source === 'debot-dom-price'),
+    'the DOM title must resume as fallback after the chart feed becomes stale');
 });
 
 test('Debot average lines use Lightweight price lines and recover after chart remount', () => {

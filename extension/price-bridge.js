@@ -2597,6 +2597,10 @@
   function pollDebotVisiblePrice() {
     if (!feedActive() || !currentSymbolInfo.mint) return;
     try { if (document.hidden) return; } catch (_) {}
+    // The visible candle is the price the trader is judging on the chart.
+    // Debot's separate Price/价格 DOM field can briefly disagree with it;
+    // keep that field fallback-only until the chart feed is genuinely stale.
+    if (Date.now() - lastLiveBarAt <= BAR_CLOSE_FRESH_MS) return;
     const usd = debotVisibleUsdPrice();
     if (!(usd > 0)) return;
     const now = Date.now();
