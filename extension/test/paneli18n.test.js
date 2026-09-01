@@ -43,3 +43,10 @@ test('Debot receives a restrained venue-matched skin without changing other site
   assert.match(content, /\.pt-box\.pt-debot \.pt-buy\s*\{[^}]*box-shadow:\s*none/s);
   assert.match(content, /\.pt-box\.pt-debot \.pt-sell\s*\{[^}]*background:\s*transparent/s);
 });
+
+test('Debot centers a larger yellow honesty banner and uses clean sans-serif position figures', () => {
+  assert.match(content, /\.pt-box\.pt-debot \.pt-banner\s*\{[^}]*justify-content:\s*center;[^}]*color:\s*#f4c96b;[^}]*font-size:\s*10\.5px;/s);
+  assert.match(content, /\.pt-box\.pt-debot \.pt-pos \.v\s*\{[^}]*font-family:\s*var\(--pt-sans\)/s);
+  assert.match(content, /\.pt-box\.pt-debot \.pt-pos \.pnl\s*\{[^}]*font-family:\s*var\(--pt-sans\)/s);
+  assert.match(content, /\.pt-box\.pt-debot \.pt-led \.v\s*\{[^}]*font-family:\s*var\(--pt-sans\)/s);
+});

@@ -4763,14 +4763,16 @@
     }
     .pt-box.pt-debot::before { display: none; }
     .pt-box.pt-debot .pt-banner {
-      justify-content: flex-start;
+      justify-content: center;
       padding: 7px 12px;
-      color: #777b84;
+      color: #f4c96b;
       background: #15161a;
       border-bottom-color: #292b32;
-      font-size: 9px;
-      letter-spacing: 1px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
     }
+    .pt-box.pt-debot .pt-banner b { font-weight: 700; letter-spacing: 0.8px; }
     .pt-box.pt-debot .pt-banner::after { display: none; }
     .pt-box.pt-debot .pt-header { padding: 9px 11px; gap: 8px; }
     .pt-box.pt-debot .pt-icon {
@@ -4829,9 +4831,13 @@
     }
     .pt-box.pt-debot .pt-pos .row { padding: 6px 0; }
     .pt-box.pt-debot .pt-pos .row + .row { border-top-color: #24262c; }
+    .pt-box.pt-debot .pt-pos .v {
+      font-family: var(--pt-sans); font-weight: 700; letter-spacing: -0.15px;
+    }
     .pt-box.pt-debot .pt-pos .pnl {
       padding: 7px 9px; min-height: auto; border-radius: 8px;
-      font-size: 18px; line-height: 1.3;
+      font-family: var(--pt-sans); font-size: 18px; font-weight: 700;
+      letter-spacing: -0.2px; line-height: 1.3;
     }
     .pt-box.pt-debot .pt-ledger {
       gap: 0; padding-top: 6px; border-top: 1px solid #292b32;
@@ -4840,7 +4846,10 @@
       padding: 5px 4px; background: transparent; border: 0; border-radius: 0;
     }
     .pt-box.pt-debot .pt-led .k { font-size: 8px; letter-spacing: 0.35px; }
-    .pt-box.pt-debot .pt-led .v { font-size: 10.5px; }
+    .pt-box.pt-debot .pt-led .v {
+      font-family: var(--pt-sans); font-size: 10.5px; font-weight: 650;
+      letter-spacing: -0.1px;
+    }
     .pt-box.pt-debot .pt-sell-row { gap: 6px; }
     .pt-box.pt-debot .pt-sell {
       padding: 9px 2px; color: #ff4065; background: transparent;
