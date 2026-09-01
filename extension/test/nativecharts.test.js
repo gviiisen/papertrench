@@ -227,12 +227,18 @@ function runBridge(opts = {}) {
     };
   }
   let debotSeries = makeDebotSeries();
+  const debotStaleSeries = opts.debotMultipleSeries ? makeDebotSeries() : null;
   const debotHost = {};
   function attachDebotFiber() {
     Object.defineProperty(debotHost, '__reactFiber$debot', {
       value: {
         return: null, child: null, sibling: null,
-        memoizedState: { memoizedState: { current: debotSeries }, next: null },
+        memoizedState: {
+          memoizedState: { current: debotStaleSeries || debotSeries },
+          next: debotStaleSeries
+            ? { memoizedState: { current: debotSeries }, next: null }
+            : null,
+        },
       },
       configurable: true,
       enumerable: true,
@@ -497,6 +503,43 @@ test('a fresh Debot chart bar outranks a divergent DOM price fallback for live P
   assert.ok(env.emitted.some((message) => message.type === 'tick'
     && message.payload?.source === 'debot-dom-price'),
     'the DOM title must resume as fallback after the chart feed becomes stale');
+});
+
+test('Debot 5s uses the actively updating candlestick when a stale series appears first', () => {
+  const env = runBridge({
+    debot: true,
+    debotMultipleSeries: true,
+    debotVisiblePrice: 0.0003518,
+  });
+  env.send('paper-axis', {
+    mint: '0xeb9e768c42d6f5b08d34980c6f721494372a7777',
+    symbol: '彩礼币',
+  });
+  env.runTimers();
+  env.emitted.length = 0;
+  env.advance(3000);
+
+  const visibleSeries = env.debotSeries();
+  visibleSeries.setData([
+    { time: 1_800_000_000, open: 240_000, high: 242_000, low: 235_000, close: 240_300 },
+  ]);
+  visibleSeries.update({
+    time: 1_800_000_000, open: 240_000, high: 242_000, low: 235_000, close: 236_300,
+  });
+  visibleSeries.setMarkers([
+    { time: 1_800_000_000, position: 'belowBar', color: '#00aa88', shape: 'circle', text: 'B' },
+  ]);
+  env.runTimers();
+
+  const ticks = env.emitted.filter((message) => message.type === 'tick');
+  const chartTicks = ticks.filter((message) => message.payload?.source === 'debot-chart-bar');
+  assert.equal(chartTicks.at(-1)?.payload?.candidates?.[0]?.value, 236_300,
+    'the latest visible 5s close must supply the live P&L price');
+  assert.equal(ticks.some((message) => message.payload?.source === 'debot-dom-price'), false,
+    'the DOM fallback must not overwrite the active 5s candle');
+  const buy = env.debotMarkers.find((marker) => marker.text === 'B');
+  assert.equal(buy?.color, '#FACC15', 'the visible series must receive the yellow paper buy style');
+  assert.equal(buy?.size, 2, 'the visible series must receive the larger paper buy marker');
 });
 
 test('Debot average lines use Lightweight price lines and recover after chart remount', () => {

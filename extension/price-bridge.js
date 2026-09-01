@@ -2628,16 +2628,18 @@
     } catch (_) { return false; }
   }
 
-  function findDebotSeries() {
-    if (!/(^|\.)debot\.ai$/.test(location.hostname)) return null;
+  function findDebotSeriesCandidates() {
+    if (!/(^|\.)debot\.ai$/.test(location.hostname)) return [];
     const host = document.getElementById('chart') || document.querySelector('#chart');
-    if (!host) return null;
+    if (!host) return [];
     const fiberKey = Object.getOwnPropertyNames(host)
       .find((key) => key.indexOf('__reactFiber$') === 0);
     let root = fiberKey && host[fiberKey];
-    if (!root) return null;
+    if (!root) return [];
     while (root.return) root = root.return;
     const seen = new Set();
+    const seriesSeen = new Set();
+    const found = [];
     const stack = [root];
     let inspected = 0;
     while (stack.length && inspected++ < 6000) {
@@ -2652,12 +2654,17 @@
         const value = hook.memoizedState;
         const candidates = [value, value && value.current];
         for (const candidate of candidates) {
-          try { if (looksLikeDebotSeries(candidate)) return candidate; } catch (_) {}
+          try {
+            if (looksLikeDebotSeries(candidate) && !seriesSeen.has(candidate)) {
+              seriesSeen.add(candidate);
+              found.push(candidate);
+            }
+          } catch (_) {}
         }
         hook = hook.next;
       }
     }
-    return null;
+    return found;
   }
 
   function debotTimeSec(value) {
@@ -2727,6 +2734,12 @@
     } catch (_) { return false; }
   }
 
+  function activateDebotSeries(state) {
+    if (!state || debotSeries === state.series) return;
+    clearDebotAverageLines();
+    debotSeries = state.series;
+  }
+
   function patchDebotSeries(series) {
     let state = debotPatchedSeries.get(series);
     if (!state) {
@@ -2741,6 +2754,7 @@
       series.setMarkers = function (markers) {
         try {
           state.siteMarkers = Array.isArray(markers) ? markers.slice() : [];
+          activateDebotSeries(state);
           applyDebotMarkers(state);
           return undefined;
         } catch (_) {
@@ -2749,12 +2763,18 @@
       };
       series.setData = function (bars) {
         const result = state.originalSetData.apply(this, arguments);
-        try { noteDebotBars(state, bars); applyDebotMarkers(state); syncDebotAverageLines(); } catch (_) {}
+        try {
+          activateDebotSeries(state);
+          noteDebotBars(state, bars);
+          applyDebotMarkers(state);
+          syncDebotAverageLines();
+        } catch (_) {}
         return result;
       };
       series.update = function (bar) {
         const result = state.originalUpdate.apply(this, arguments);
         try {
+          activateDebotSeries(state);
           const t = debotTimeSec(bar && bar.time);
           if (t) {
             const times = state.barTimes;
@@ -2768,17 +2788,23 @@
       };
       debotPatchedSeries.set(series, state);
     }
-    if (debotSeries !== series) {
-      clearDebotAverageLines();
-      debotSeries = series;
-      applyDebotMarkers(state);
-    }
     return state;
   }
 
   function ensureDebotSeries() {
-    const found = findDebotSeries();
-    return found ? patchDebotSeries(found) : null;
+    const found = findDebotSeriesCandidates();
+    if (!found.length) return null;
+    let activeState = null;
+    for (const series of found) {
+      const state = patchDebotSeries(series);
+      if (series === debotSeries) activeState = state;
+    }
+    if (!activeState) {
+      activeState = patchDebotSeries(found[0]);
+      activateDebotSeries(activeState);
+      applyDebotMarkers(activeState);
+    }
+    return activeState;
   }
 
   function removeDebotLine(line, series) {
