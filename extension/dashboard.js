@@ -891,12 +891,26 @@ function renderSection(id) {
   else if (id === 'coach') renderCoach(staged);
   else if (id === 'settings') renderSettings(staged);
 
+  // The live section may already be Chinese. Compare against a translated
+  // CLONE, but keep `staged` in source English. Moving already-translated
+  // detached nodes into the document would discard the translator's WeakMap
+  // source records and make a later switch back to EN impossible.
+  let comparable = staged;
+  if (window.PTDashboardI18n && window.PTDashboardI18n.controller) {
+    comparable = staged.cloneNode(true);
+    window.PTDashboardI18n.controller.translateTree(comparable);
+  }
+
   // Identical output means there is nothing to repaint.
   if (el.innerHTML === staged.innerHTML) return;
+  if (el.innerHTML === comparable.innerHTML) return;
 
   // replaceChildren swaps in a single mutation, so no empty frame exists.
   if (typeof el.replaceChildren === 'function') el.replaceChildren(...staged.childNodes);
   else el.innerHTML = staged.innerHTML;
+  if (window.PTDashboardI18n && window.PTDashboardI18n.controller) {
+    window.PTDashboardI18n.controller.translateTree(el);
+  }
   rebindSection(id, el);
 }
 

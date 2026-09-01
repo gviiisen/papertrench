@@ -2491,7 +2491,7 @@ function isSolanaAddress(s) {
  * STRICT — they become chain-aware, never looser. A claimed chain must be a
  * known fomo slug, and the address must match THAT chain's shape exactly. */
 const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
-const KNOWN_CHAINS = ['solana', 'base', 'monad', 'bnb', 'ethereum', 'hyperliquid', 'robinhood'];
+const KNOWN_CHAINS = ['solana', 'bsc', 'base', 'monad', 'bnb', 'ethereum', 'hyperliquid', 'robinhood'];
 
 function isEvmAddress(s) {
   return typeof s === 'string' && EVM_ADDR_RE.test(s);
@@ -2884,8 +2884,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // the page origin's CORS or CSP. The content script supplies only mints
       // and addresses; the background decides which public APIs to call.
       case 'pt_resolve': {
-        const chain = chainOfClaim(message.chain) || 'solana';
-        if (!isAddressForChain(message.address, chain)) { sendResponse(null); break; }
+        const chain = message.chain == null ? 'solana' : chainOfClaim(message.chain);
+        if (!chain || !isAddressForChain(message.address, chain)) { sendResponse(null); break; }
         const maxAgeMs = Number(message.maxAgeMs);
         const opts = {};
         if (Number.isFinite(maxAgeMs) && maxAgeMs >= 0) opts.maxAgeMs = maxAgeMs;
@@ -2896,6 +2896,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'pt_sol_usd':
         try { sendResponse(await R.solUsd()); } catch (e) { sendResponse(0); }
+        break;
+
+      case 'pt_native_usd':
+        try { sendResponse(await R.nativeUsd(message.chain)); } catch (e) { sendResponse(0); }
         break;
 
       case 'pt_refresh':

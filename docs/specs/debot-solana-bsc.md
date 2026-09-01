@@ -12,6 +12,19 @@ Chain/address mismatches are refused. A Solana route accepts only a 32–44
 character base58 address; a BSC route accepts only an exact 20-byte hex
 address.
 
+## Live-price contract
+
+- A pending Debot token retains the chain parsed from its URL before any
+  resolver responds; a BSC contract is never retried as a Solana mint.
+- BSC/EVM contract matching is case-insensitive, while Solana base58 matching
+  remains case-sensitive.
+- BSC page ticks remain BNB-native. An explicit matching native+USD pair may
+  establish the first quote without waiting for an aggregator, but a cached
+  SOL/USD rate is never used to convert a BSC price.
+- If no chain-matching quote can be established from the resolver or Debot's
+  own mint-tagged feed, the panel continues to report that it is fetching a
+  price and refuses to fabricate a fill.
+
 ## Accounting contract
 
 - Solana buys, sells, open positions, and realized P&L are denominated in SOL.
@@ -52,8 +65,9 @@ support is unavailable instead of inventing chart coordinates.
 
 ## Verification
 
-The regression suite covers strict URL parsing, BSC quote routing without a
-SOL conversion, isolated SOL/BNB accounts, native-currency position rows and
+The regression suite covers strict URL parsing, pending-chain retention,
+case-tolerant EVM feed matching, first-price bootstrapping without a SOL
+conversion, isolated SOL/BNB accounts, native-currency position rows and
 closed P&L, marker merging, average price lines, and chart remount recovery.
 
 <!-- repo-context-ledger:changes:start -->

@@ -79,7 +79,9 @@
   // the engine trades in. It moves slowly relative to a memecoin, so a short
   // cache keeps fresh-launch resolution to a single round trip.
   var solUsdCache = { at: 0, value: 0 };
+  var bnbUsdCache = { at: 0, value: 0 };
   var SOL_USD_TTL_MS = 30000;
+  var WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
 
   function jupiterUrl(query) {
     return JUP + '?query=' + encodeURIComponent(query);
@@ -292,6 +294,28 @@
     return rate || 0;
   }
 
+  /** BNB/USD from the most-liquid WBNB market already normalized by quote.js. */
+  async function bnbUsd() {
+    var now = Date.now();
+    if (now - bnbUsdCache.at < SOL_USD_TTL_MS && bnbUsdCache.value > 0) {
+      return bnbUsdCache.value;
+    }
+    var payload = await getJson(BASE + '/tokens/' + WBNB_ADDRESS, 4000);
+    var wrapped = Q.tokenFromPayload(payload, WBNB_ADDRESS, { chain: 'bsc' });
+    var native = Number(wrapped && wrapped.priceNative);
+    var usd = Number(wrapped && wrapped.priceUsd);
+    var rate = native > 0 && usd > 0 ? usd / native : 0;
+    if (rate > 0) bnbUsdCache = { at: now, value: rate };
+    return rate || 0;
+  }
+
+  /** Chain-native USD reference used only to convert an explicit USD quote. */
+  async function nativeUsd(chain) {
+    if (chain === 'bsc' || chain === 'bnb') return bnbUsd();
+    if (!chain || chain === 'solana') return solUsd();
+    return 0;
+  }
+
   function clearCache() { cache.clear(); }
 
   var api = {
@@ -300,6 +324,7 @@
     batchPrices: batchPrices,
     clearCache: clearCache,
     solUsd: solUsd,
+    nativeUsd: nativeUsd,
     BASE: BASE,
     BATCH_CHUNK: BATCH_CHUNK,
   };

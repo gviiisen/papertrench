@@ -144,6 +144,28 @@ test('solUsd exposes the cached SOL/USD rate even when the token is unindexed', 
   assert.equal(second, first, 'repeated calls return the cached value');
 });
 
+test('nativeUsd returns a real BNB/USD rate from the WBNB market', async () => {
+  const WBNB = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+  let hits = 0;
+  const R = loadResolver((url) => {
+    if (!url.includes('/tokens/' + WBNB)) return notFound();
+    hits++;
+    return jsonResponse({ pairs: [{
+      chainId: 'bsc',
+      pairAddress: '0x' + '12'.repeat(20),
+      baseToken: { address: WBNB, symbol: 'WBNB', name: 'Wrapped BNB' },
+      quoteToken: { address: '0x' + '34'.repeat(20), symbol: 'USDT' },
+      priceNative: '1',
+      priceUsd: '600',
+      liquidity: { usd: 1000000 },
+    }] });
+  });
+
+  assert.equal(await R.nativeUsd('bsc'), 600);
+  assert.equal(await R.nativeUsd('bsc'), 600);
+  assert.equal(hits, 1, 'the BNB/USD reference is cached');
+});
+
 /* ---------------- live API (skips cleanly when offline) ---------------- */
 
 /** Probe the live API so the assertions can be skipped (not failed) offline. */

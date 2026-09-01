@@ -524,7 +524,7 @@
 
     if (!pendingToken || !pendingToken.mint) return reject('no-token');
     if (!tick || typeof tick !== 'object') return reject('no-candidates');
-    if (tick.mint && tick.mint !== pendingToken.mint) return reject('mint-mismatch');
+    if (tick.mint && !sameAddress(tick.mint, pendingToken.mint)) return reject('mint-mismatch');
 
     var rate = Number(solUsd) > 0 ? Number(solUsd) : null;
     var candidates = Array.isArray(tick.candidates) ? tick.candidates : [];
@@ -532,8 +532,9 @@
 
     // Only trust chart/trade sources or mint-tagged payloads. A random number
     // scraped off the page must never price a brand-new coin.
-    var trusted = tick.mint === pendingToken.mint
+    var trusted = sameAddress(tick.mint, pendingToken.mint)
       || tick.source === 'padre-chart-bar'
+      || tick.source === 'debot-chart-bar'
       || tick.source === 'chart-export'
       || tick.source === 'gmgn-ws-trade'
       || tick.source === 'gmgn-mcap-candle';
@@ -549,6 +550,28 @@
         basis: basis,
       };
     };
+
+    // Multichain venue payloads commonly carry the token price twice: once
+    // in the chain's native asset and once in USD. That pair is self-
+    // converting (USD/native is the native asset's USD rate), so a fresh
+    // Debot BSC coin does not need Dexscreener to know the BNB price first.
+    // Pick the newest explicit value of each unit and keep a broad but finite
+    // native-asset band; nonsense pairs are refused rather than guessed.
+    var explicitNative = null;
+    var explicitUsd = null;
+    for (var pairedIndex = candidates.length - 1; pairedIndex >= 0; pairedIndex--) {
+      var paired = candidates[pairedIndex];
+      var pairedValue = Number(paired && paired.value);
+      if (!(pairedValue > 0)) continue;
+      if (paired.unit === 'native' && explicitNative === null) explicitNative = pairedValue;
+      if (paired.unit === 'usd' && explicitUsd === null) explicitUsd = pairedValue;
+    }
+    if (explicitNative && explicitUsd) {
+      var impliedNativeUsd = explicitUsd / explicitNative;
+      if (impliedNativeUsd >= 1 && impliedNativeUsd <= 1_000_000) {
+        return accept(explicitNative, explicitUsd, tickMcap, 'native+usd');
+      }
+    }
 
     // GMGN's live trade feed is mint-tagged and quotes in USD. Convert it to
     // the SOL price the engine trades in.
@@ -722,7 +745,7 @@
     if (!anchor || !(Number(anchor.priceNative) > 0)) return reject('no-anchor');
     if (!tick || typeof tick !== 'object') return reject('no-candidates');
     // A tick carrying a different mint is about a different token entirely.
-    if (tick.mint && anchor.mint && tick.mint !== anchor.mint) {
+    if (tick.mint && anchor.mint && !sameAddress(tick.mint, anchor.mint)) {
       return reject('mint-mismatch');
     }
 
@@ -1509,10 +1532,13 @@
      * the secondary line for the rare case someone wants it. */
     const hasMcap = Number(token.mcap) > 0;
     const mcapText = hasMcap ? formatMarketCap(Number(token.mcap)) : '';
+    const nativeSymbol = typeof token.nativeSymbol === 'string' && token.nativeSymbol.trim()
+      ? token.nativeSymbol.trim().toUpperCase()
+      : ((token.chain === 'bsc' || token.chain === 'bnb') ? 'BNB' : 'SOL');
     const priceText = hasMcap
           ? mcapText
           : (hasTrustedPrice
-            ? formatPrice(Number(token.priceNative)) + ' SOL'
+            ? formatPrice(Number(token.priceNative)) + ' ' + nativeSymbol
             // D-38: the old fresh-launch wait-line is gone for good. It read
             // like the coin was broken while the terminal already printed it,
             // and the BUY clicks straight to the chain anyway. The unpriced

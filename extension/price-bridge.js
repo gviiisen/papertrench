@@ -104,7 +104,11 @@
     // and the export dedupe must forget the old token's close, or the first
     // poll on the new token can be swallowed as "unchanged" (DEFECT F-19).
     // The GMGN candle close is the same class of per-token evidence (C-08).
-    if (changed) { lastBarClose = 0; lastBarTimeSec = 0; lastExportedClose = 0; gmgnLastCandleClose = 0; barCloseLedger.clear(); }
+    if (changed) {
+      lastBarClose = 0; lastBarTimeSec = 0; lastExportedClose = 0;
+      gmgnLastCandleClose = 0; lastDebotDomUsd = 0; lastDebotDomEmitAt = 0;
+      barCloseLedger.clear();
+    }
   }
   // GMGN runs a private TradingView widget inside a same-origin blob iframe.
   // Its live React chart manager exposes `getActiveChart().createOrderLine()`.
@@ -180,6 +184,8 @@
   }
 
   const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const EVM_RE = /^0x[0-9a-fA-F]{40}$/;
+  const addressKey = (value) => EVM_RE.test(value) ? value.toLowerCase() : value;
   // avgPrice is deliberately ABSENT: it is a position-average field, not a
   // live price. When the user holds a REAL position, the site streams their
   // real entry average under that key, and treating it as a market tick let
@@ -267,10 +273,11 @@
     let budget = NODE_BUDGET;
 
     const recordFor = (mint) => {
-      let rec = records.get(mint);
+      const lookup = addressKey(mint);
+      let rec = records.get(lookup);
       if (!rec) {
         rec = { candidates: [], mcap: null, mint, symbol: null, name: null };
-        records.set(mint, rec);
+        records.set(lookup, rec);
       }
       return rec;
     };
@@ -296,7 +303,7 @@
         let bestRank = 0;
         let bestMint = null;
         for (const [key, value] of Object.entries(node)) {
-          if (typeof value !== 'string' || !BASE58_RE.test(value)) continue;
+          if (typeof value !== 'string' || !(BASE58_RE.test(value) || EVM_RE.test(value))) continue;
           const rank = mintKeyRank(key);
           if (rank > bestRank) { bestRank = rank; bestMint = value; }
         }
@@ -474,8 +481,8 @@
     if (records.size) {
       // Watched token first — the GMGN fast-path contract, now generic — then
       // a bounded top-up so screener row chips keep their mint-tagged prices.
-      const watched = (currentSymbolInfo.mint && records.get(currentSymbolInfo.mint))
-        || (currentSymbolInfo.pairAddress && records.get(currentSymbolInfo.pairAddress))
+      const watched = (currentSymbolInfo.mint && records.get(addressKey(currentSymbolInfo.mint)))
+        || (currentSymbolInfo.pairAddress && records.get(addressKey(currentSymbolInfo.pairAddress)))
         || null;
       let emitted = 0;
       if (watched && hasContent(watched)) { emit('tick', { ...watched, source }); emitted++; }
@@ -2564,6 +2571,47 @@
   let debotSellLine = null;
   const debotFillPayloads = new Map();
   const debotPatchedSeries = new WeakMap();
+  let lastDebotDomUsd = 0;
+  let lastDebotDomEmitAt = 0;
+
+  /** Exact decimal behind Debot's visible Price/价格 field. The title keeps
+   * full precision while textContent uses subscript-zero compact notation. */
+  function debotVisibleUsdPrice() {
+    if (!/(^|\.)debot\.ai$/.test(location.hostname)) return null;
+    let nodes;
+    try { nodes = document.querySelectorAll('[title]'); } catch (_) { return null; }
+    for (const node of nodes) {
+      const value = numberValue(node && node.getAttribute && node.getAttribute('title'));
+      const visible = String((node && node.textContent) || '').trim();
+      if (!(value > 0) || visible.charAt(0) !== '$') continue;
+      let ancestor = node;
+      for (let depth = 0; ancestor && depth < 5; depth += 1, ancestor = ancestor.parentElement) {
+        const label = String(ancestor.innerText || ancestor.textContent || '')
+          .replace(/\s+/g, ' ').trim();
+        if (/^(价格|Price)\s+\$/i.test(label)) return value;
+      }
+    }
+    return null;
+  }
+
+  function pollDebotVisiblePrice() {
+    if (!feedActive() || !currentSymbolInfo.mint) return;
+    try { if (document.hidden) return; } catch (_) {}
+    const usd = debotVisibleUsdPrice();
+    if (!(usd > 0)) return;
+    const now = Date.now();
+    if (usd === lastDebotDomUsd && now - lastDebotDomEmitAt < 2500) return;
+    lastDebotDomUsd = usd;
+    lastDebotDomEmitAt = now;
+    emit('tick', {
+      candidates: [{ value: usd, unit: 'usd', key: 'visiblePriceTitle' }],
+      mcap: null,
+      mint: currentSymbolInfo.mint,
+      symbol: currentSymbolInfo.symbol,
+      name: null,
+      source: 'debot-dom-price',
+    });
+  }
 
   function looksLikeDebotSeries(value) {
     if (!value || typeof value !== 'object') return false;
@@ -4089,7 +4137,10 @@
   function pollChartClose() {
     // Lightweight mode supplies ticks directly from setData/update. In
     // TradingView mode Debot still needs the normal export fallback.
-    if (/(^|\.)debot\.ai$/.test(location.hostname) && ensureDebotSeries()) return;
+    if (/(^|\.)debot\.ai$/.test(location.hostname)) {
+      pollDebotVisiblePrice();
+      if (ensureDebotSeries()) return;
+    }
     const now = Date.now();
     // F-26: a page that has produced no TradingView widget for a minute has
     // nothing to export — stand down with the widget sweep; the slow sweep

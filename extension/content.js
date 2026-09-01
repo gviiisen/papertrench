@@ -27,6 +27,8 @@
     resolve: (address, opts) => sendMessage({ type: 'pt_resolve', address, maxAgeMs: opts && opts.maxAgeMs, chain: opts && opts.chain }).then(okOrNull),
     refresh: (token) => sendMessage({ type: 'pt_refresh', token }).then(okOrNull),
     solUsd: () => sendMessage({ type: 'pt_sol_usd' }).then((r) => (typeof r === 'number' && r > 0 ? r : 0)).catch(() => 0),
+    nativeUsd: (chain) => sendMessage({ type: 'pt_native_usd', chain: chain || 'solana' })
+      .then((r) => (typeof r === 'number' && r > 0 ? r : 0)).catch(() => 0),
     onchainWatch: (mint, pool) => sendMessage({ type: 'pt_onchain_watch', mint, pool }).then(okOrNull),
     onchainPrewatch: (ids) => sendMessage({ type: 'pt_onchain_prewatch', pool: ids.pool || null, mint: ids.mint || null }).then(okOrNull),
     rugCheck: (mint) => sendMessage({ type: 'pt_rug_check', mint }).then(okOrNull),
@@ -108,7 +110,7 @@
   // Fresh-launch tracking: how long the current address has been unresolved.
   let pendingSince = 0;
   let pendingAttempts = 0;
-  let pendingSolUsd = 0;      // warmed SOL/USD rate for bootstrapping USD ticks
+  const pendingNativeUsd = { solana: 0, bsc: 0 }; // real native/USD references for USD ticks
   let fastDetectTimer = null;
   let detectLoopTimer = null;
   let barScanTimer = null;
@@ -650,7 +652,7 @@
     // Reject cross-token page ticks as early as possible. The bridge is
     // supposed to filter, but a preload chart or an unknown-symbol feed can
     // still leak through.
-    if (payload.mint && payload.mint !== token.mint) return;
+    if (payload.mint && !Q.sameAddress(payload.mint, token.mint)) return;
     if (payload.symbol && token.symbol
       && String(payload.symbol).toUpperCase() !== String(token.symbol).toUpperCase()) return;
 
@@ -664,7 +666,12 @@
     if (Number(anchor && anchor.priceNative) > 0) {
       verdict = Q.validateTick(anchor, payload);
     } else {
-      verdict = Q.bootstrapTick(token, payload, pendingSolUsd);
+      // Use the matching chain's reference only: SOL/USD for Solana and
+      // BNB/USD for BSC. Rates are stored in separate slots so navigating
+      // between chains cannot convert a quote with the previous page's asset.
+      const rateKey = token.chain === 'bsc' || token.chain === 'bnb' ? 'bsc' : 'solana';
+      const bootstrapRate = pendingNativeUsd[rateKey];
+      verdict = Q.bootstrapTick(token, payload, bootstrapRate);
     }
     if (!verdict || !verdict.accepted) {
       // A RUN of out-of-band rejections is not noise — it is a genuine move
@@ -1064,6 +1071,8 @@
       }
       setToken({
         mint: candidate.address, srcAddress: candidate.address, symbol: null, name: null,
+        chain: candidate.chain || 'solana',
+        nativeSymbol: candidate.chain === 'bsc' ? 'BNB' : 'SOL',
         priceNative: null, priceUsd: null, pending: true,
       });
       pendingSince = Date.now();
@@ -1074,10 +1083,11 @@
         pairAddress: candidate.kind === 'pair' ? candidate.address : null,
         mint: candidate.kind === 'mint' ? candidate.address : null,
       });
-      // Warm the SOL/USD rate so a USD on-screen price can be filled the moment
-      // it appears — and, multichain, so a foreign token's SOL price can be
-      // derived. resolveViaJupiter also populates this cache shortly.
-      R.solUsd().then((rate) => { if (rate > 0) pendingSolUsd = rate; }).catch(() => {});
+      // Warm the chain's native/USD rate so Debot's exact visible USD quote
+      // can become a native SOL/BNB paper fill before an aggregator indexes it.
+      R.nativeUsd(candidate.chain).then((rate) => {
+        if (rate > 0) pendingNativeUsd[candidate.chain === 'bsc' ? 'bsc' : 'solana'] = rate;
+      }).catch(() => {});
       // The sniping path is SOLANA-ONLY machinery (bonding curves, on-chain
       // pool watching): a foreign-chain token skips it instead of failing it.
       if (!candidate.chain || candidate.chain === 'solana') prewatchPending(candidate);
@@ -1250,9 +1260,10 @@
       pendingAttempts += 1;
     } finally {
       resolving = false;
-      // The resolver warms the SOL/USD cache even when the token is still
-      // unindexed; capture that rate for pending-token bootstraps.
-      R.solUsd().then((rate) => { if (rate > 0) pendingSolUsd = rate; }).catch(() => {});
+      // Capture the matching native/USD reference for pending-token page ticks.
+      R.nativeUsd(candidate.chain).then((rate) => {
+        if (rate > 0) pendingNativeUsd[candidate.chain === 'bsc' ? 'bsc' : 'solana'] = rate;
+      }).catch(() => {});
     }
   }
 
@@ -4106,6 +4117,12 @@
      * restatements are gone — the banner carries it, stated once, clearly.
      * The PnL-card watermark doctrine is separate and untouched. */
 
+    .pt-banner, .pt-header {
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+    .pt-banner:active, .pt-header:active { cursor: grabbing; }
     .pt-banner {
       position: relative; z-index: 2;
       display: flex; align-items: center; justify-content: center; gap: 7px;
@@ -5267,7 +5284,7 @@
         <button class="pt-bar-tab" id="pt-bar-tab" title="Show paper positions">POSITIONS</button>
         <button class="pt-game-hud pt-hidden" id="pt-game-hud" title="Game on — click to open the Game tab"></button>
         <div class="pt-box" id="pt-box">
-          <div class="pt-banner"><b>Paper Trading</b> · Simulated Funds</div>
+          <div class="pt-banner" id="pt-drag-banner" title="Drag to move"><b>Paper Trading</b> · Simulated Funds</div>
           <div class="pt-header" id="pt-drag">
             <div class="pt-icon">${ICONS.mark}</div>
             <div class="pt-title">PaperTrench<span class="sub" id="pt-subtitle">Quick paper buy box</span></div>
@@ -5570,7 +5587,9 @@
 
     // "Make it remember its place" (levv6x): the dragged position must
     // survive page refreshes and new tabs. Persist it on drop and restore it
-    // in createUI. The header is the handle; buttons on it are exempt.
+    // in createUI. Both visually prominent top rows are handles; interactive
+    // controls on them remain exempt so a click never starts a drag.
+    const dragBanner = shadow.getElementById('pt-drag-banner');
     const drag = shadow.getElementById('pt-drag');
     const persistPanelPos = () => {
       const read = readPanelPos();
@@ -5587,9 +5606,15 @@
       move: (start, dx, dy) => applyPanelPos(start.right - dx, start.top + dy),
       drop: persistPanelPos,
     };
+    const panelDragIgnore = (e) => Boolean(
+      e.target && e.target.closest
+      && (e.target.closest('button, a, input, select, textarea')
+        || e.target.closest('[contenteditable="true"]'))
+    );
+    makeDraggable(dragBanner, panelSpec);
     makeDraggable(drag, {
       ...panelSpec,
-      ignore: (e) => Boolean(e.target && e.target.closest && e.target.closest('button')),
+      ignore: panelDragIgnore,
     });
     // O-20: the minimized pill shares the panel's position and is a drag
     // handle itself — dragging it moves (and persists) the shared spot.
