@@ -541,8 +541,10 @@ test('Debot 5s uses the actively updating candlestick when a stale series appear
   assert.equal(ticks.some((message) => message.payload?.source === 'debot-dom-price'), false,
     'the DOM fallback must not overwrite the active 5s candle');
   const buy = env.debotMarkers.find((marker) => marker.text === 'B');
-  assert.equal(buy?.color, '#FACC15', 'the visible series must receive the yellow paper buy style');
-  assert.equal(buy?.size, 2, 'the visible series must receive the larger paper buy marker');
+  assert.equal(buy?.color, '#00aa88',
+    'the active 5s series keeps Debot native styling until a paper fill exists');
+  assert.equal(buy?.size, undefined,
+    'the extension must not enlarge an untraded token native marker');
 });
 
 test('Debot 5s candle refreshes do not repaint unchanged native marker circles', () => {
@@ -589,7 +591,7 @@ test('Debot periodic chart probes do not repaint unchanged marker circles every 
   assert.equal(env.debotMarkers.length, 2, 'the native and paper circles remain continuously installed');
 });
 
-test('Debot ignores semantically identical native marker batches on untraded charts', () => {
+test('Debot leaves the native marker lifecycle untouched on untraded charts', () => {
   const env = runBridge({ debot: true });
   env.runTimers();
   const series = env.debotSeries();
@@ -598,19 +600,19 @@ test('Debot ignores semantically identical native marker batches on untraded cha
     { time: 1_800_000_005, position: 'aboveBar', color: '#ee4466', shape: 'circle', text: 'wallet' },
   ]);
   series.setMarkers(nativeBatch());
-  const writesAfterFirstBatch = env.debotMarkerWrites();
+  const repeatedBatches = 6;
+  for (let i = 0; i < repeatedBatches; i += 1) series.setMarkers(nativeBatch());
 
-  for (let i = 0; i < 6; i += 1) series.setMarkers(nativeBatch());
-
-  assert.equal(env.debotMarkerWrites(), writesAfterFirstBatch,
-    'equivalent one-second site batches must not reinstall every circle');
+  assert.equal(env.debotMarkerWrites(), 1 + repeatedBatches,
+    'the extension must not suppress Debot marker calls needed by the site chart lifecycle');
   assert.equal(env.debotMarkers.length, 2, 'the unchanged native circles remain continuously installed');
-  assert.equal(env.debotMarkers[0].color, '#FACC15', 'the deduplicated B marker keeps its yellow style');
+  assert.equal(env.debotMarkers[0].color, '#00aa88',
+    'the extension must not restyle Debot markers when this token has no paper fills');
 
   const changedBatch = nativeBatch();
   changedBatch[1].text = 'wallet changed';
   series.setMarkers(changedBatch);
-  assert.equal(env.debotMarkerWrites(), writesAfterFirstBatch + 1,
+  assert.equal(env.debotMarkerWrites(), 2 + repeatedBatches,
     'a real marker content change must still reach the chart exactly once');
   assert.equal(env.debotMarkers[1].text, 'wallet changed');
 });

@@ -2770,6 +2770,16 @@
         try {
           state.siteMarkers = Array.isArray(markers) ? markers.slice() : [];
           activateDebotSeries(state);
+          // Match the stable GMGN contract: until PaperTrench owns a fill on
+          // this token, Debot owns its marker pipeline completely. In
+          // particular, do not suppress repeated native batches or restyle
+          // them. Debot uses those calls as part of its chart lifecycle; the
+          // previous global dedupe could make it remount the series, producing
+          // the visible once-per-second flash (and apparent page refresh).
+          if (!debotFillPayloads.size) {
+            state.markerSignature = null;
+            return state.originalSetMarkers.apply(this, arguments);
+          }
           applyDebotMarkers(state);
           return undefined;
         } catch (_) {
@@ -2816,7 +2826,10 @@
     if (!activeState) {
       activeState = patchDebotSeries(found[0]);
       activateDebotSeries(activeState);
-      applyDebotMarkers(activeState);
+      // Discovery must be read-only on an untraded token. Writing an empty
+      // marker batch here erased Debot's circles on every series remount; the
+      // site's next native batch restored them, which presented as flashing.
+      if (debotFillPayloads.size) applyDebotMarkers(activeState);
     }
     return activeState;
   }
