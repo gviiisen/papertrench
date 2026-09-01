@@ -180,6 +180,16 @@ test('a user http endpoint yields a matching websocket url', () => {
   assert.equal(first.url, 'wss://my-node.example.com/rpc');
 });
 
+test('a saved Solana Labs HTTP endpoint is never promoted to its rejected WebSocket', () => {
+  const P = loadPool(async () => okResponse('ok'));
+  P.setUserEndpoint('https://api.mainnet-beta.solana.com');
+  const urls = P.websocketUrls().map((entry) => entry.url);
+  assert.equal(urls.includes('wss://api.mainnet-beta.solana.com'), false,
+    'the saved HTTP endpoint may serve reads, but its extension WebSocket handshake returns 403');
+  assert.equal(P.ranked()[0].http, 'https://api.mainnet-beta.solana.com',
+    'the saved endpoint must remain preferred for ordinary HTTP RPC reads');
+});
+
 /* ---------------- websocket ranking ---------------- */
 
 test('only endpoints that actually support websockets are offered for streaming', () => {

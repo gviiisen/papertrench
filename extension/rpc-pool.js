@@ -144,10 +144,15 @@
     if (!url || typeof url !== 'string') { userEndpoint = null; return; }
     const trimmed = url.trim();
     if (!/^https?:\/\//i.test(trimmed)) { userEndpoint = null; return; }
+    // Solana Labs accepts ordinary HTTP RPC reads here, but rejects Chrome
+    // extension WebSocket handshakes with 403. A saved copy of this public
+    // URL must not bypass the same streaming exclusion as the built-in one.
+    const rejectsExtensionWs = /^https?:\/\/api\.mainnet-beta\.solana\.com(?::\d+)?(?:[/?#]|$)/i.test(trimmed);
+    const ws = rejectsExtensionWs ? null : trimmed.replace(/^http/i, 'ws');
     userEndpoint = {
       id: 'user',
       http: trimmed,
-      ws: trimmed.replace(/^http/i, 'ws'),
+      ws,
     };
   }
 
