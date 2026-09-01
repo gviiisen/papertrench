@@ -29,6 +29,9 @@ address.
 
 - Solana buys, sells, open positions, and realized P&L are denominated in SOL.
 - BSC buys, sells, open positions, and realized P&L are denominated in BNB.
+- Every denomination-sensitive panel control and position-ledger value redraws
+  after asynchronous token detection: BSC shows BNB, Solana shows SOL, and the
+  Solana-only pending-limit row is hidden on BSC.
 - The two cash accounts are isolated. A BSC fill cannot debit or credit SOL,
   and a Solana fill cannot debit or credit BNB.
 - Every fill, position, and closed round records its chain and native currency.

@@ -200,6 +200,21 @@ test('the overlay orders and displays BSC trades in BNB, not dollars or SOL', ()
     'BSC quick-buy presets must be labelled BNB');
 });
 
+test('recognizing BSC after panel mount redraws every denomination-sensitive control', () => {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+  const renderAllStart = content.indexOf('function renderAll()');
+  const renderAll = content.slice(renderAllStart, content.indexOf('\n  }', renderAllStart) + 4);
+  assert.match(renderAll, /renderPresets\(\)/,
+    'the initial panel is rendered before token detection, so token adoption must redraw presets and hide the Solana limit row');
+
+  const ledgerStart = content.indexOf('function renderPositionLedger(');
+  const ledger = content.slice(ledgerStart, content.indexOf('\n  }', ledgerStart) + 4);
+  assert.match(ledger, /panelCurrency\(\)/,
+    'invested, sold, remaining and change must use the active chain currency');
+  assert.doesNotMatch(ledger, /\$\{E\.fmt\(sol, 3\)\} SOL/,
+    'the BSC position ledger must not append a hard-coded SOL suffix');
+});
+
 test('position rows retain their chain currency so portfolio UI cannot add SOL and BNB', () => {
   const state = {
     positions: {

@@ -89,8 +89,11 @@ test('the panel renders it in the venue currency, and only after a sell', () => 
   assert.ok(!/led\.sells === 0/.test(fn), 'the ledger must not hide itself any more');
   assert.match(fn, /ledger\.classList\.remove\('pt-hidden'\)/,
     'it is shown on every pass');
-  assert.match(fn, /panelUsd\(\)/, 'dollars off Solana');
-  assert.match(fn, /E\.fmt\(sol, 3\)} SOL/, 'SOL on Solana');
+  assert.match(fn, /panelUsd\(\)/, 'dollars on legacy foreign-chain panels');
+  assert.match(fn, /pos\.currency \|\| panelCurrency\(\)/,
+    'native ledgers use the position currency: SOL on Solana, BNB on BSC');
+  assert.doesNotMatch(fn, /E\.fmt\([^)]*, 3\)} SOL/,
+    'a native ledger must not append SOL unconditionally');
   assert.match(fn, /pt-house/, 'and it must mark the house-money state');
 });
 

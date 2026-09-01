@@ -5414,7 +5414,6 @@
     els.resize = shadow.getElementById('pt-resize');
 
     bindUI();
-    renderPresets();
     renderAll();
     applyOverlaySize();
   }
@@ -5560,10 +5559,11 @@
     els.btnBuy.addEventListener('click', () => {
       const custom = Number(els.custom.value);
       const sel = els.buyPresets.querySelector('.pt-preset.sel');
-      // Panel units throughout — dollars on a foreign-chain panel, SOL
-      // otherwise; requestBuy owns the conversion.
+      // Panel units throughout — dollars on legacy foreign-chain panels and
+      // native currency (SOL/BNB) otherwise; requestBuy owns the conversion.
       const amt = custom > 0 ? custom : sel ? Number(sel.dataset.amt) : 0;
-      if (!(amt > 0)) return toast(panelUsd() ? 'Pick a dollar amount first' : 'Pick a SOL amount first');
+      if (!(amt > 0)) return toast(panelUsd() ? 'Pick a dollar amount first'
+        : `Pick a ${panelCurrency()} amount first`);
       requestBuy(amt);
     });
     // N2: limit buys — ARM uses the same amount read as BUY; Enter in the
@@ -5790,6 +5790,7 @@
     // textContent only — no amount is ever markup.
     const locked = panelChain() === 'solana' ? E.lockedBuySol(state) : 0;
     const account = E.nativeAccount(state, panelChain(), settings);
+    els.microWallet.title = `Paper wallet ${account.symbol} — free to deploy`;
     els.microWallet.textContent = '';
     const b = document.createElement('b');
     b.textContent = `${E.fmt(account.cash, 2)} ${account.symbol}`;
@@ -6171,6 +6172,11 @@
     renderHeader();
     renderBalance();
     renderMicroWallet();
+    // The panel mounts before asynchronous token detection finishes. Rebuild
+    // denomination-sensitive controls whenever token/state is adopted so a
+    // Debot BSC page replaces its initial SOL defaults with BNB and hides the
+    // Solana-only pending-limit row.
+    renderPresets();
     renderPosition();
     renderAlerts();
     renderBuyButton();
@@ -6345,7 +6351,9 @@
     // when it actually meant "the headline above is the MC; here is the unit
     // price". Say what the number IS (F-31, reported from a live screenshot).
     const secondary = f.priceIsMarketCap
-      ? `Price ${f.priceUsdText || (f.hasTrustedPrice ? Q.formatPrice(token.priceNative) + ' SOL' : '')}`.trim()
+      ? `Price ${f.priceUsdText || (f.hasTrustedPrice
+        ? Q.formatPrice(token.priceNative) + ' ' + panelCurrency()
+        : '')}`.trim()
       : (f.priceUsdText || '');
     els.priceUsd.textContent = f.stale ? `${secondary} · reconnecting…`.trim() : secondary;
   }
@@ -7815,9 +7823,13 @@
     posEls.ledger.classList.remove('pt-hidden');
     if (!led) return;
 
-    // The panel speaks the venue's currency: dollars off Solana, SOL on it.
+    // The panel speaks the venue's currency: dollars on legacy foreign-chain
+    // books, otherwise the position's own native account (SOL or BNB).
     const rate = panelUsd() ? panelUsdRate() : null;
-    const money = (sol) => (rate ? E.fmtUsd(sol * rate) : `${E.fmt(sol, 3)} SOL`);
+    const currency = pos.currency || panelCurrency();
+    const money = (native) => (rate
+      ? E.fmtUsd(native * rate)
+      : `${E.fmt(native, 3)} ${currency}`);
 
     posEls.ledIn.textContent = money(led.investedSol);
     posEls.ledOut.textContent = money(led.soldSol);
@@ -8487,7 +8499,9 @@
     try {
       await armChartOrder(kind, trigger, 100);
       const mcap = mcapAtPrice(trigger);
-      toast(`${kind === 'tp' ? 'Take profit' : 'Stop loss'} armed at ${mcap ? fmtMoney(mcap) + ' MC' : E.fmt(trigger, 8) + ' SOL'}`
+      toast(`${kind === 'tp' ? 'Take profit' : 'Stop loss'} armed at ${mcap
+        ? fmtMoney(mcap) + ' MC'
+        : E.fmt(trigger, 8) + ' ' + panelCurrency()}`
         + (chartOrdersDraggable ? ' — drag it on the chart to adjust' : ''));
     } catch (err) {
       toast(err.message || 'That level could not be armed');
@@ -8512,7 +8526,9 @@
       const level = document.createElement('span');
       level.className = 'pt-olevel';
       const mcap = mcapAtPrice(o.triggerPrice);
-      level.textContent = (mcap ? fmtMoney(mcap) + ' MC' : E.fmt(o.triggerPrice, 8) + ' SOL')
+      level.textContent = (mcap
+        ? fmtMoney(mcap) + ' MC'
+        : E.fmt(o.triggerPrice, 8) + ' ' + panelCurrency())
         + (o.sizePct >= 100 ? '' : ` · ${o.sizePct}%`);
 
       const kill = document.createElement('button');
@@ -9006,7 +9022,7 @@
   function entryText(priceNative) {
     const mcap = mcapAtPrice(priceNative);
     if (mcap) return `${fmtMoney(mcap)} MC`;
-    return `${trimSci(priceNative)} SOL`;
+    return `${trimSci(priceNative)} ${panelCurrency()}`;
   }
 
   if (contextAlive()) chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
