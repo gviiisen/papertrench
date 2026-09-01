@@ -444,9 +444,17 @@ test('Debot merges paper fills with its existing B/S markers and emits visible-s
     fillId: 'fill-1', ts: 1_800_060_500_000, side: 'buy', text: 'PT Buy 0.5 BNB',
   });
 
-  assert.ok(env.debotMarkers.some((m) => m.text === 'B'), 'Debot buy marker is preserved');
+  const siteBuy = env.debotMarkers.find((m) => m.text === 'B');
+  assert.ok(siteBuy, 'Debot buy marker is preserved');
+  assert.equal(siteBuy.color, '#FACC15', 'the visible Debot B bubble uses the yellow highlight');
+  assert.equal(siteBuy.shape, 'circle', 'the visible Debot B marker stays circular');
+  assert.equal(siteBuy.size, 2, 'the visible Debot B circle is larger than the chart default');
   assert.ok(env.debotMarkers.some((m) => m.text === 'S'), 'Debot sell marker is preserved');
-  assert.ok(env.debotMarkers.some((m) => m.text === 'PT Buy 0.5 BNB'), 'paper fill is merged natively');
+  const paperBuy = env.debotMarkers.find((m) => m.text === 'PT Buy 0.5 BNB');
+  assert.ok(paperBuy, 'paper fill is merged natively');
+  assert.equal(paperBuy.color, '#FACC15', 'paper buys use a high-contrast yellow fill');
+  assert.equal(paperBuy.shape, 'circle', 'paper buys render as a filled circle');
+  assert.equal(paperBuy.size, 2, 'paper buy circles are larger than the chart default');
   assert.ok(env.emitted.some((m) => m.type === 'tick' && m.payload?.source === 'debot-chart-bar'),
     'the visible candlestick series supplies live chart ticks');
 });
