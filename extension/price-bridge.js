@@ -678,13 +678,27 @@
   const fiberWidgetsCache = { at: 0, widgets: [] };
   const FIBER_SCAN_INTERVAL_MS = 3000;
 
+  function tradingViewFrameVisible(frame) {
+    if (!/(^|\.)debot\.ai$/.test(location.hostname)) return true;
+    if (!frame || typeof frame.getBoundingClientRect !== 'function') return true;
+    try {
+      const rect = frame.getBoundingClientRect();
+      const style = typeof getComputedStyle === 'function' ? getComputedStyle(frame) : null;
+      if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+      return rect.width > 200 && rect.height > 100
+        && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth;
+    } catch (_) { return true; }
+  }
+
   function widgetsFromFibers() {
     const now = Date.now();
     if (now - fiberWidgetsCache.at < FIBER_SCAN_INTERVAL_MS) return fiberWidgetsCache.widgets;
     fiberWidgetsCache.at = now;
     const widgets = [];
     try {
-      const anchor = document.querySelector('iframe[id^="tradingview_"]');
+      const anchor = [...document.querySelectorAll('iframe[id^="tradingview_"]')]
+        .find(tradingViewFrameVisible) || document.querySelector('iframe[id^="tradingview_"]');
       const el = anchor && anchor.parentElement;
       const fiberKey = el && Object.getOwnPropertyNames(el).find((key) => key.indexOf('__reactFiber$') === 0);
       let root = fiberKey ? el[fiberKey] : null;
@@ -728,6 +742,7 @@
     const out = [];
     try {
       for (const frame of document.querySelectorAll('iframe[id^="tradingview_"]')) {
+        if (!tradingViewFrameVisible(frame)) continue;
         let api = null;
         try {
           api = frame.contentWindow && frame.contentWindow.tradingViewApi;
@@ -763,6 +778,9 @@
   }
 
   function findTradingViewWidgets() {
+    // Debot dynamically switches between TradingView and Lightweight Charts.
+    // Keep normal widget discovery enabled; the dedicated Debot bridge below
+    // independently handles Lightweight mode when that is the visible chart.
     const out = [];
     const push = (w) => { if (w && out.indexOf(w) < 0) out.push(w); };
     push(findGlobalWidget());
@@ -786,7 +804,7 @@
 
   let lastLiveBarAt = 0; // newest live bar through the subscribeBars hook
 
-  function emitPadreBar(bar, resolution, subscriberUID) {
+  function emitPadreBar(bar, resolution, subscriberUID, source) {
     if (!bar || typeof bar !== 'object') return;
     const close = numberValue(bar.close);
     if (!(close > 0)) return;
@@ -831,12 +849,12 @@
     // validates it against the trusted Dexscreener anchors and chooses the
     // matching interpretation.
     emit('tick', {
-      candidates: [{ value: close, unit: 'unknown', key: 'padreChartClose' }],
+      candidates: [{ value: close, unit: 'unknown', key: source === 'debot-chart-bar' ? 'debotChartClose' : 'padreChartClose' }],
       mcap: close,
       mint: currentSymbolInfo.mint,
       symbol: currentSymbolInfo.symbol,
       name: null,
-      source: 'padre-chart-bar',
+      source: source || 'padre-chart-bar',
       barTime: bar.time || null,
       resolution: resolution || null,
     });
@@ -2532,6 +2550,230 @@
     }, 2000);
   }
 
+  /* ---------------- Debot visible Lightweight Charts ----------------
+   *
+   * Debot switches between a visible TradingView iframe and a top-document
+   * Lightweight Charts candlestick series held in a React ref under #chart.
+   * The normal TradingView bridge handles the first; this dedicated bridge
+   * discovers the second by API shape and preserves its existing B/S markers.
+   */
+
+  let debotSeries = null;
+  let debotLineSpec = null;
+  let debotBuyLine = null;
+  let debotSellLine = null;
+  const debotFillPayloads = new Map();
+  const debotPatchedSeries = new WeakMap();
+
+  function looksLikeDebotSeries(value) {
+    if (!value || typeof value !== 'object') return false;
+    if (typeof value.setMarkers !== 'function'
+      || typeof value.setData !== 'function'
+      || typeof value.update !== 'function'
+      || typeof value.createPriceLine !== 'function') return false;
+    try {
+      return typeof value.seriesType !== 'function' || value.seriesType() === 'Candlestick';
+    } catch (_) { return false; }
+  }
+
+  function findDebotSeries() {
+    if (!/(^|\.)debot\.ai$/.test(location.hostname)) return null;
+    const host = document.getElementById('chart') || document.querySelector('#chart');
+    if (!host) return null;
+    const fiberKey = Object.getOwnPropertyNames(host)
+      .find((key) => key.indexOf('__reactFiber$') === 0);
+    let root = fiberKey && host[fiberKey];
+    if (!root) return null;
+    while (root.return) root = root.return;
+    const seen = new Set();
+    const stack = [root];
+    let inspected = 0;
+    while (stack.length && inspected++ < 6000) {
+      const fiber = stack.pop();
+      if (!fiber || seen.has(fiber)) continue;
+      seen.add(fiber);
+      if (fiber.child) stack.push(fiber.child);
+      if (fiber.sibling) stack.push(fiber.sibling);
+      let hook = fiber.memoizedState;
+      let hooks = 0;
+      while (hook && hooks++ < 120) {
+        const value = hook.memoizedState;
+        const candidates = [value, value && value.current];
+        for (const candidate of candidates) {
+          try { if (looksLikeDebotSeries(candidate)) return candidate; } catch (_) {}
+        }
+        hook = hook.next;
+      }
+    }
+    return null;
+  }
+
+  function debotTimeSec(value) {
+    const n = Number(value);
+    if (!(n > 0)) return null;
+    return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+  }
+
+  function noteDebotBars(state, bars) {
+    if (!Array.isArray(bars) || !bars.length) return;
+    const times = [];
+    for (const bar of bars) {
+      const t = debotTimeSec(bar && bar.time);
+      if (t) times.push(t);
+    }
+    if (times.length) state.barTimes = times.slice(-2000);
+    const last = bars[bars.length - 1];
+    try { emitPadreBar(last, null, 'debot-visible', 'debot-chart-bar'); } catch (_) {}
+  }
+
+  function debotMarkerTime(state, payload) {
+    const wanted = debotTimeSec(payload && payload.ts);
+    if (!wanted) return null;
+    const times = state.barTimes || [];
+    if (!times.length) return wanted;
+    let best = times[0];
+    let distance = Math.abs(best - wanted);
+    for (let i = 1; i < times.length; i += 1) {
+      const nextDistance = Math.abs(times[i] - wanted);
+      if (nextDistance < distance) { best = times[i]; distance = nextDistance; }
+    }
+    return best;
+  }
+
+  function debotPaperMarkers(state) {
+    const out = [];
+    for (const payload of debotFillPayloads.values()) {
+      const time = debotMarkerTime(state, payload);
+      if (!time) continue;
+      const sell = payload.side === 'sell';
+      out.push({
+        time,
+        position: sell ? 'aboveBar' : 'belowBar',
+        color: sell ? '#FF5F56' : '#00D6A2',
+        shape: sell ? 'arrowDown' : 'arrowUp',
+        text: payload.text || (sell ? 'PT Sell' : 'PT Buy'),
+      });
+    }
+    return out;
+  }
+
+  function applyDebotMarkers(state) {
+    if (!state || !state.series) return false;
+    const merged = [...state.siteMarkers, ...debotPaperMarkers(state)]
+      .sort((a, b) => (debotTimeSec(a.time) || 0) - (debotTimeSec(b.time) || 0));
+    try {
+      state.originalSetMarkers.call(state.series, merged);
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function patchDebotSeries(series) {
+    let state = debotPatchedSeries.get(series);
+    if (!state) {
+      state = {
+        series,
+        siteMarkers: [],
+        barTimes: [],
+        originalSetMarkers: series.setMarkers,
+        originalSetData: series.setData,
+        originalUpdate: series.update,
+      };
+      series.setMarkers = function (markers) {
+        try {
+          state.siteMarkers = Array.isArray(markers) ? markers.slice() : [];
+          applyDebotMarkers(state);
+          return undefined;
+        } catch (_) {
+          return state.originalSetMarkers.apply(this, arguments);
+        }
+      };
+      series.setData = function (bars) {
+        const result = state.originalSetData.apply(this, arguments);
+        try { noteDebotBars(state, bars); applyDebotMarkers(state); syncDebotAverageLines(); } catch (_) {}
+        return result;
+      };
+      series.update = function (bar) {
+        const result = state.originalUpdate.apply(this, arguments);
+        try {
+          const t = debotTimeSec(bar && bar.time);
+          if (t) {
+            const times = state.barTimes;
+            if (!times.length || times[times.length - 1] !== t) times.push(t);
+            if (times.length > 2000) times.splice(0, times.length - 2000);
+          }
+          emitPadreBar(bar, null, 'debot-visible', 'debot-chart-bar');
+          syncDebotAverageLines();
+        } catch (_) {}
+        return result;
+      };
+      debotPatchedSeries.set(series, state);
+    }
+    if (debotSeries !== series) {
+      clearDebotAverageLines();
+      debotSeries = series;
+      applyDebotMarkers(state);
+    }
+    return state;
+  }
+
+  function ensureDebotSeries() {
+    const found = findDebotSeries();
+    return found ? patchDebotSeries(found) : null;
+  }
+
+  function removeDebotLine(line, series) {
+    if (!line) return;
+    try {
+      if (series && typeof series.removePriceLine === 'function') series.removePriceLine(line);
+      else if (typeof line.remove === 'function') line.remove();
+    } catch (_) {}
+  }
+
+  function clearDebotAverageLines() {
+    removeDebotLine(debotBuyLine, debotSeries);
+    removeDebotLine(debotSellLine, debotSeries);
+    debotBuyLine = null;
+    debotSellLine = null;
+  }
+
+  function syncDebotLine(existing, price, title, color) {
+    if (!(price > 0) || !debotSeries) {
+      removeDebotLine(existing, debotSeries);
+      return null;
+    }
+    const options = {
+      price, title, color,
+      lineWidth: Math.max(1, Math.min(4, Math.round(Number(debotLineSpec && debotLineSpec.lineWidth) || 2))),
+      axisLabelVisible: true,
+    };
+    try {
+      if (existing && typeof existing.applyOptions === 'function') {
+        existing.applyOptions(options);
+        return existing;
+      }
+      return debotSeries.createPriceLine(options);
+    } catch (_) { return null; }
+  }
+
+  function syncDebotAverageLines() {
+    if (!debotLineSpec || !debotLineSpec.enabled) {
+      clearDebotAverageLines();
+      return true;
+    }
+    if (!ensureDebotSeries()) return false;
+    const buy = lineLevelFor(debotLineSpec, 'Buy');
+    const sell = lineLevelFor(debotLineSpec, 'Sell');
+    debotBuyLine = syncDebotLine(debotBuyLine, buy, debotLineSpec.buyLabel || 'PT Avg Buy', '#00D6A2');
+    debotSellLine = syncDebotLine(debotSellLine, sell, debotLineSpec.sellLabel || 'PT Avg Sell', '#FF5F56');
+    return (!buy || Boolean(debotBuyLine)) && (!sell || Boolean(debotSellLine));
+  }
+
+  function clearDebotFillMarkers() {
+    debotFillPayloads.clear();
+    const state = debotSeries && debotPatchedSeries.get(debotSeries);
+    if (state) applyDebotMarkers(state);
+  }
+
   /* ---------------- GMGN native TradingView order lines ---------------- */
 
   function findGmgnChart() {
@@ -2899,6 +3141,9 @@
       clearPaperOrderLines();
       clearGmgnAverageLines();
       clearGmgnFillMarkers();
+      debotLineSpec = null;
+      clearDebotAverageLines();
+      clearDebotFillMarkers();
       refreshPadreMarks();
       lastContentMessageAt = Date.now() - CONTENT_SILENCE_LIMIT_MS;
       // A standdown also ends feed demand outright: "PaperTrench off" must
@@ -2975,6 +3220,60 @@
       // A fresher spec may be exactly what a queued capless fill was waiting
       // for (C-16) — give the drain a chance without waiting for the sweep.
       if (gmgnMarkerQueue.length) scheduleGmgnMarkerDrain();
+      return;
+    }
+
+    if (type === 'debot-marker') {
+      const id = String(payload && (payload.fillId || payload.id) || '');
+      const ts = numberValue(payload && payload.ts);
+      if (!id || !(ts > 0)) {
+        emit('debot-chart-status', { action: 'marker', ok: false, reason: 'invalid-marker' });
+        return;
+      }
+      debotFillPayloads.set(id, { ...payload, fillId: id, ts });
+      if (debotFillPayloads.size > MAX_MARKS) {
+        debotFillPayloads.delete(debotFillPayloads.keys().next().value);
+      }
+      const state = ensureDebotSeries();
+      const ok = state ? applyDebotMarkers(state) : false;
+      emit('debot-chart-status', { action: 'marker', ok, count: debotFillPayloads.size });
+      return;
+    }
+
+    if (type === 'debot-marker-clear') {
+      clearDebotFillMarkers();
+      emit('debot-chart-status', { action: 'marker-clear', ok: true });
+      return;
+    }
+
+    if (type === 'debot-lines-clear') {
+      debotLineSpec = null;
+      clearDebotAverageLines();
+      emit('debot-chart-status', { action: 'lines-clear', ok: true });
+      return;
+    }
+
+    if (type === 'debot-lines') {
+      debotLineSpec = {
+        enabled: Boolean(payload && payload.enabled),
+        axisBasis: typeof (payload && payload.axisBasis) === 'string' ? payload.axisBasis : null,
+        currentMcap: numberValue(payload && payload.currentMcap),
+        currentPriceNative: numberValue(payload && payload.currentPriceNative),
+        currentPriceUsd: numberValue(payload && payload.currentPriceUsd),
+        avgBuyUsd: numberValue(payload && payload.avgBuyUsd),
+        avgSellUsd: numberValue(payload && payload.avgSellUsd),
+        avgBuyMcap: numberValue(payload && payload.avgBuyMcap),
+        avgSellMcap: numberValue(payload && payload.avgSellMcap),
+        avgBuyNative: numberValue(payload && payload.avgBuyNative),
+        avgSellNative: numberValue(payload && payload.avgSellNative),
+        avgBuyMcapNative: numberValue(payload && payload.avgBuyMcapNative),
+        avgSellMcapNative: numberValue(payload && payload.avgSellMcapNative),
+        lineWidth: numberValue(payload && payload.lineWidth),
+        buyLabel: typeof (payload && payload.buyLabel) === 'string' ? payload.buyLabel : null,
+        sellLabel: typeof (payload && payload.sellLabel) === 'string' ? payload.sellLabel : null,
+      };
+      const ok = syncDebotAverageLines();
+      emit('debot-chart-status', { action: 'lines', ok });
       return;
     }
 
@@ -3788,6 +4087,9 @@
   let exportSeq = 0;
 
   function pollChartClose() {
+    // Lightweight mode supplies ticks directly from setData/update. In
+    // TradingView mode Debot still needs the normal export fallback.
+    if (/(^|\.)debot\.ai$/.test(location.hostname) && ensureDebotSeries()) return;
     const now = Date.now();
     // F-26: a page that has produced no TradingView widget for a minute has
     // nothing to export — stand down with the widget sweep; the slow sweep
@@ -3859,7 +4161,8 @@
   let fastChecks = 0;
   const fastTimer = setInterval(() => {
     fastChecks += 1;
-    if (patchPadreWidget() || fastChecks >= 500) clearInterval(fastTimer);
+    const debotReady = Boolean(ensureDebotSeries());
+    if (debotReady || patchPadreWidget() || fastChecks >= 500) clearInterval(fastTimer);
   }, 10);
   let sweepTicks = 0;
   setInterval(() => {
@@ -3869,6 +4172,12 @@
     // repainting lines/marks; the transport wrappers keep forwarding ticks,
     // and any future content-script message revives the sweep instantly.
     if (Date.now() - lastContentMessageAt > CONTENT_SILENCE_LIMIT_MS) return;
+
+    const debotState = ensureDebotSeries();
+    if (debotState) {
+      if (debotFillPayloads.size) applyDebotMarkers(debotState);
+      if (debotLineSpec && debotLineSpec.enabled) syncDebotAverageLines();
+    }
 
     // GMGN recovery is driven by its own chart manager, not the TradingView
     // widget scan, so it runs whenever specs/queues exist.

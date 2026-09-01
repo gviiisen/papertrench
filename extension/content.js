@@ -161,7 +161,7 @@
    * TradingView library and expose a widget with `activeChart()`, so one code
    * path serves both.
    */
-  const NATIVE_TV_SITES = new Set(['padre', 'axiom']);
+  const NATIVE_TV_SITES = new Set(['padre', 'axiom', 'debot']);
   /* DEFECT C-19: routing is CAPABILITY-based beyond that hardcoded set. The
    * bridge's TradingView discovery is site-agnostic and already runs on
    * Photon/BullX/DexScreener/…; when it reports a usable widget
@@ -528,12 +528,36 @@
       // The GMGN bridge reports only lifecycle status; its labels live on the
       // native TradingView lines rather than in the PaperTrench card.
       renderSiteStatus();
+    } else if (ev.type === 'debot-chart-status') {
+      // Debot's Lightweight Charts bridge reports marker/line lifecycle here.
+      // Keep it for diagnostics; no website message can trigger a fill.
+      if (ev.payload && ev.payload.action === 'marker') lastMarkerStatus = ev.payload;
+      else lastLineStatus = ev.payload || null;
+      renderSiteStatus();
     }
   }
   window.addEventListener('message', onBridgeMessage);
 
   function sendPadreMarker(type, payload) {
     window.postMessage({ source: 'papertrench-content', type, payload: payload || null }, '*');
+  }
+
+  /** Debot can render either TradingView or Lightweight Charts. Post the
+   * standard native message for TradingView and its Debot twin for the
+   * Lightweight series; whichever implementation is visible owns the draw. */
+  function sendNativeChart(type, payload) {
+    if (!(site && site.id === 'debot')) {
+      sendPadreMarker(type, payload);
+      return;
+    }
+    sendPadreMarker(type, payload);
+    const mapped = ({
+      'paper-marker': 'debot-marker',
+      'paper-marker-clear': 'debot-marker-clear',
+      'paper-lines': 'debot-lines',
+      'paper-lines-clear': 'debot-lines-clear',
+    })[type];
+    if (mapped) sendPadreMarker(mapped, payload);
   }
 
   /**
@@ -562,7 +586,7 @@
       return { plot, display: chartMcap, currency: 'MCAP' };
     }
     const fallback = usd || Number(priceNative);
-    return { plot: fallback, display: fallback, currency: usd ? 'USD' : 'SOL' };
+    return { plot: fallback, display: fallback, currency: usd ? 'USD' : panelCurrency() };
   }
 
   /* -------------------- price handling -------------------- */
@@ -664,7 +688,8 @@
     oobRejects = 0;
 
     // A live chart tick that validates tells us which unit the chart plots.
-    if ((payload.source === 'padre-chart-bar' || payload.source === 'chart-export') && verdict.basis) {
+    if ((payload.source === 'padre-chart-bar' || payload.source === 'debot-chart-bar'
+      || payload.source === 'chart-export') && verdict.basis) {
       const basisChanged = chartAxisBasis !== verdict.basis;
       chartAxisBasis = verdict.basis;
       // DEFECT C-06: a chart unit toggle (Price⇄MCap, USD⇄SOL) surfaces here
@@ -1362,8 +1387,8 @@
       if (usesNativeChart()) {
         // Padre uses its own TradingView getMarks pipeline. Clear native paper
         // marks for the previous token; do not mount the generic SVG overlay.
-        sendPadreMarker('paper-marker-clear');
-        sendPadreMarker('paper-lines-clear');
+        sendNativeChart('paper-marker-clear');
+        sendNativeChart('paper-lines-clear');
         if (CM) CM.destroyChartMarkers();
       } else if (CM) {
         // The generic SVG state is token-scoped. GMGN also owns native
@@ -1382,8 +1407,8 @@
       drawnFillIds.clear();
       if (CM) CM.destroyChartMarkers();
       if (usesNativeChart()) {
-        sendPadreMarker('paper-marker-clear');
-        sendPadreMarker('paper-lines-clear');
+        sendNativeChart('paper-marker-clear');
+        sendNativeChart('paper-lines-clear');
       }
       if (site && site.id === 'gmgn') sendPadreMarker('gmgn-lines-clear');
     }
@@ -1754,7 +1779,7 @@
     const point = genericChartPoint(fill.priceNative, fill.priceUsd, fill.mcap);
 
     if (usesNativeChart()) {
-      sendPadreMarker('paper-marker', {
+      sendNativeChart('paper-marker', {
         ts: markerTs,
         // F-41: the trade's own id, so the bridge can recognize this exact
         // fill and never draw it twice.
@@ -1768,6 +1793,9 @@
         side: fill.side,
         solAmount: fill.solAmount,
         symbol: token && token.symbol,
+        text: site && site.id === 'debot'
+          ? `${fill.side === 'buy' ? 'PT Buy' : 'PT Sell'} ${E.fmt(fill.solAmount, 3)} ${panelCurrency()}`
+          : null,
       });
       return;
     }
@@ -2463,6 +2491,10 @@
    */
   function syncChartOrders(force) {
     if (!usesNativeChart()) return;
+    // Debot's Lightweight Charts series supports fixed price lines but not
+    // draggable TradingView order-line adapters. Orders still evaluate from
+    // live ticks; only the unsupported drag surface is withheld.
+    if (site && site.id === 'debot') return;
     if (!chartOrdersOn() || !token || !token.mint) {
       if (lastOrderSpecSignature !== null) {
         lastOrderSpecSignature = null;
@@ -2535,7 +2567,7 @@
   function orderLineLabel(order) {
     const kind = order.kind === 'tp' ? 'TP' : 'SL';
     const mcap = mcapAtPrice(order.triggerPrice);
-    const level = mcap ? fmtMoney(mcap) : E.fmt(order.triggerPrice, 8) + ' SOL';
+    const level = mcap ? fmtMoney(mcap) : E.fmt(order.triggerPrice, 8) + ' ' + panelCurrency();
     // The % is measured from the AVERAGE ENTRY — the same number the average
     // fill line draws from, so the chart cannot show two different entries.
     // With no average yet, the label claims no percentage at all.
@@ -2876,7 +2908,7 @@
   function syncAveragePriceLines() {
     if (!settings.averagePriceLinesEnabled || !token || !token.mint) {
       lastLinesActive = false;
-      if (usesNativeChart()) sendPadreMarker('paper-lines-clear');
+      if (usesNativeChart()) sendNativeChart('paper-lines-clear');
       if (site && site.id === 'gmgn') sendPadreMarker('gmgn-lines-clear');
       if (CM && site && !usesNativeChart()) CM.clearAverageLines();
       return;
@@ -2885,7 +2917,7 @@
     const averages = E.averageFillPrices(state, token.mint);
     if (!averages) {
       lastLinesActive = false;
-      if (usesNativeChart()) sendPadreMarker('paper-lines-clear');
+      if (usesNativeChart()) sendNativeChart('paper-lines-clear');
       if (site && site.id === 'gmgn') sendPadreMarker('gmgn-lines-clear');
       if (CM && site && !usesNativeChart()) CM.clearAverageLines();
       return;
@@ -2914,7 +2946,7 @@
       const nativeSupply = Number(token.mcap) > 0 && Number(token.priceUsd) > 0
         ? Number(token.mcap) / Number(token.priceUsd)
         : null;
-      sendPadreMarker('paper-lines', {
+      sendNativeChart('paper-lines', {
         enabled: true,
         // Ground truth from the live chart ticks: draw in exactly the unit
         // the chart's Y axis is showing (price vs MC, USD vs SOL).
@@ -3150,7 +3182,9 @@
    * `amt` is in PANEL units: SOL normally, dollars on a foreign-chain panel.
    */
   async function requestBuy(amt) {
-    if (!(amt > 0)) return toast(panelUsd() ? 'Pick a dollar amount first' : 'Pick a SOL amount first');
+    if (!(amt > 0)) return toast(panelUsd()
+      ? 'Pick a dollar amount first'
+      : `Pick a ${panelCurrency()} amount first`);
     if (buyInFlight) return toast('Buy already in progress…');
     // Dollar panels convert to SOL book units at the recorded rate before
     // anything else sees the amount — the engine and guardrails only ever
@@ -3175,7 +3209,9 @@
     // fake so the habit exists before the money is real. A dollar-armed buy
     // has no SOL amount yet; flushArmedBuy re-checks at fire time.
     if (solAmount != null) {
-      const guard = E.guardCheck(state, settings, { solAmount });
+      const guard = E.guardCheck(state, settings, {
+        nativeAmount: solAmount, solAmount, chain: token && token.chain,
+      });
       if (!guard.ok) return toast(guard.message);
     }
     // Rug guard (maintainer request): when chain state says the float is in
@@ -3208,7 +3244,9 @@
         if (token && Number(token.priceNative) > 0 && solAmount != null) {
           // The guard deferred because no SOL amount existed at click time
           // now has one — enforce it before the fill, like at fire time.
-          const guardNow = E.guardCheck(state, settings, { solAmount });
+          const guardNow = E.guardCheck(state, settings, {
+            nativeAmount: solAmount, solAmount, chain: token && token.chain,
+          });
           if (!guardNow.ok) return toast(guardNow.message);
           buyInFlight = true;
           buyInFlightAt = Date.now();
@@ -3260,6 +3298,7 @@
             priceSource: fillQuote.source || null,
             priceAgeMs: fillQuote.receivedAt > 0 ? Date.now() - fillQuote.receivedAt : null,
             chain: token.chain || 'solana',
+            nativeAmount: solAmount,
             solAmount,
             // The dollar amount the trader actually tapped on a foreign-chain
             // panel — recorded so receipts echo the order as it was placed.
@@ -3317,7 +3356,7 @@
         const atMcap = mcapAtPrice(result.trade.priceNative);
         const boughtText = quotedUsd
           ? `$${E.fmt(quotedUsd, quotedUsd < 10 ? 2 : 0)}`
-          : `${E.fmt(solAmount, 3)} SOL`;
+          : `${E.fmt(solAmount, 3)} ${panelCurrency()}`;
         // A just-launched coin may still be symbol-less at fill time; the
         // mint shortened reads as identity, "null" reads as broken (live
         // report). Same fallback order the engine stamps on positions.
@@ -3540,9 +3579,9 @@
         // one line instead of two stacked toasts. Partial sells keep the
         // single sold line; the grade line (gaming) stays its own thought.
         if (!result.round) {
-          toast(`Sold ${Math.round(fraction * 100)}%${exitMcap ? ` at ${fmtMoney(exitMcap)} MC` : ''} — ${pnl >= 0 ? '+' : ''}${E.fmt(pnl)} SOL paper`);
+          toast(`Sold ${Math.round(fraction * 100)}%${exitMcap ? ` at ${fmtMoney(exitMcap)} MC` : ''} — ${pnl >= 0 ? '+' : ''}${E.fmt(pnl)} ${panelCurrency()} paper`);
         } else {
-          toast(`Sold ${Math.round(fraction * 100)}%${exitMcap ? ` at ${fmtMoney(exitMcap)} MC` : ''} — round closed: ${result.round.pnlSol >= 0 ? '+' : ''}${E.fmt(result.round.pnlSol)} SOL (${result.round.pnlPct.toFixed(1)}%) paper`);
+          toast(`Sold ${Math.round(fraction * 100)}%${exitMcap ? ` at ${fmtMoney(exitMcap)} MC` : ''} — round closed: ${result.round.pnlSol >= 0 ? '+' : ''}${E.fmt(result.round.pnlSol)} ${panelCurrency()} (${result.round.pnlPct.toFixed(1)}%) paper`);
           // The grade toast judges PROCESS, decoupled from P&L on purpose: a
           // disciplined red earns its praise, a lucky win gets named as luck
           // (GAMIFY.md). Plain text — toast() renders textContent only.
@@ -5334,6 +5373,7 @@
     els.editTip = shadow.getElementById('pt-edit-tip');
     els.editSlip = shadow.getElementById('pt-edit-slip');
     els.btnBuy = shadow.getElementById('pt-buy');
+    els.limitRow = shadow.getElementById('pt-limit-row');
     els.limitPrice = shadow.getElementById('pt-limit-price');
     els.limitArm = shadow.getElementById('pt-limit-arm');
     els.limitList = shadow.getElementById('pt-limit-list');
@@ -5677,8 +5717,18 @@
     if (els.btnBuy) els.btnBuy.style.display = sectionOn ? '' : 'none';
     if (els.buyPresets) els.buyPresets.style.display = presetsOn ? '' : 'none';
 
-    // Chips carry PANEL units: SOL on Solana, dollars on foreign chains
-    // (requestBuy converts at the recorded rate).
+    const currency = panelCurrency();
+    if (els.custom) els.custom.placeholder = `Or type a custom ${currency} amount…`;
+    if (els.editBuy && els.editBuy.previousElementSibling) {
+      els.editBuy.previousElementSibling.textContent = `Buy ${currency}`;
+    }
+    // Pending limit buys still use the legacy SOL order book. Hiding that
+    // row on BSC is more honest than arming an order against the wrong
+    // account; market buys/sells and TP/SL evaluation remain chain-native.
+    if (els.limitRow) els.limitRow.style.display = panelChain() === 'solana' ? '' : 'none';
+
+    // Chips carry PANEL units: SOL on Solana, BNB on BSC, and dollars on the
+    // still-gated legacy foreign-chain path.
     const usdMode = panelUsd();
     const list = usdMode
       ? (settings.presetsBuyUsd || USD_PRESETS_DEFAULT)
@@ -5691,7 +5741,7 @@
     // one the user never chose made "selected" and "tap = buy" conflicting
     // claims on the same pixel. Selection exists only in two-step mode.
     els.buyPresets.innerHTML = list.map((a, i) =>
-      `<button class="pt-preset${!instant && i === 1 ? ' sel' : ''}" data-amt="${a}" title="${instant ? 'Buy this amount instantly' : 'Select this amount'}">${usdMode ? `$${a}` : `${a} SOL`}</button>`
+      `<button class="pt-preset${!instant && i === 1 ? ' sel' : ''}" data-amt="${a}" title="${instant ? 'Buy this amount instantly' : 'Select this amount'}">${usdMode ? `$${a}` : `${a} ${panelCurrency()}`}</button>`
     ).join('');
     els.buyPresets.querySelectorAll('.pt-preset').forEach((b) => {
       b.addEventListener('click', () => {
@@ -5713,10 +5763,11 @@
     els.microWallet.style.display = micro ? '' : 'none';
     if (!micro || !state) return;
     // textContent only — no amount is ever markup.
-    const locked = E.lockedBuySol(state);
+    const locked = panelChain() === 'solana' ? E.lockedBuySol(state) : 0;
+    const account = E.nativeAccount(state, panelChain(), settings);
     els.microWallet.textContent = '';
     const b = document.createElement('b');
-    b.textContent = `${E.fmt(state.cashSol, 2)} ◎`;
+    b.textContent = `${E.fmt(account.cash, 2)} ${account.symbol}`;
     els.microWallet.appendChild(b);
     if (locked > 0) {
       const l = document.createElement('span');
@@ -5737,8 +5788,18 @@
    * an honest refusal instead of a fill. */
   const USD_PRESETS_DEFAULT = [10, 100, 500, 1000];
 
+  function panelChain() {
+    const chain = token && token.chain;
+    return chain === 'bsc' || chain === 'bnb' ? 'bsc' : 'solana';
+  }
+
+  function panelCurrency() {
+    return panelChain() === 'bsc' ? 'BNB' : 'SOL';
+  }
+
   function panelUsd() {
-    return Boolean(token && token.chain && token.chain !== 'solana');
+    return Boolean(token && token.chain
+      && token.chain !== 'solana' && token.chain !== 'bsc' && token.chain !== 'bnb');
   }
 
   function panelUsdRate() {
@@ -5799,7 +5860,8 @@
       // truth: $1000 shown means a $1000 preset fills.
       return rate ? `Buy ($) · $${E.fmt(state.cashSol * rate, 0)} cash` : 'Buy ($)';
     }
-    return `Buy (SOL) · ${E.fmt(state.cashSol, 2)} cash`;
+    const account = E.nativeAccount(state, panelChain(), settings);
+    return `Buy (${account.symbol}) · ${E.fmt(account.cash, 2)} cash`;
   }
 
   /** The simulated-cost strip under the presets: fee, gas, tip, slippage at
@@ -6174,14 +6236,14 @@
     sendMessage({ type: 'pt_clear_recordings' });
     sendMessage({ type: 'pt_settings_changed' });
     // Chart drawings belong to the old wallet.
-    sendPadreMarker('paper-marker-clear');
-    sendPadreMarker('paper-lines-clear');
+    sendNativeChart('paper-marker-clear');
+    sendNativeChart('paper-lines-clear');
     drawnFillIds.clear();
     if (site && site.id === 'gmgn') sendPadreMarker('gmgn-lines-clear');
     if (CM && usesSvgMarkers()) { CM.clearMarkers(); CM.clearAverageLines(); }
     marks = [];
     renderAll();
-    toast(`Paper wallet reset — fresh ${E.fmt(settings.balanceStartSol, 2)} SOL`);
+    toast(`Paper wallet reset — fresh ${E.fmt(settings.balanceStartSol, 2)} SOL and ${E.fmt(settings.balanceStartBnb, 2)} BNB`);
   }
 
   function renderSiteStatus() {
@@ -6504,7 +6566,9 @@
       amount = armedUsd / rate;
       // The guard that normally runs at request time was deferred for
       // exactly this path — the SOL amount only exists now.
-      const guard = E.guardCheck(state, settings, { solAmount: amount });
+      const guard = E.guardCheck(state, settings, {
+        nativeAmount: amount, solAmount: amount, chain: token && token.chain,
+      });
       if (!guard.ok) { toast(guard.message); return; }
     }
     if (!(amount > 0)) return;
@@ -7130,7 +7194,14 @@
     applyBarOffset(show);
     if (!show) return;
 
-    const summary = Q.portfolioSummary(rows);
+    const chainRows = {
+      solana: rows.filter((row) => row.chain !== 'bsc'),
+      bsc: rows.filter((row) => row.chain === 'bsc'),
+    };
+    const summaries = {
+      solana: Q.portfolioSummary(chainRows.solana),
+      bsc: Q.portfolioSummary(chainRows.bsc),
+    };
     if (els.barTotal) {
       // Built once, then updated via textContent only. Nothing derived from a
       // token's own metadata is ever interpreted as markup.
@@ -7149,7 +7220,6 @@
         els.barTotal.appendChild(pct);
         barTotalEls = { count, sol, pct };
       }
-      const sign = summary.up ? '+' : '';
       // N2: armed limit buys lock SOL — show it in the bar total so the
       // "missing" cash is explained where the trader looks for it.
       const locked = E.lockedBuySol(state);
@@ -7157,16 +7227,24 @@
         // away32: the empty bar IS the wallet — "N ◎ idle" reads as the
         // number to deploy, not a position count pretending to be one.
         barTotalEls.count.textContent = 'wallet';
-        barTotalEls.sol.textContent = `${E.fmt(state.cashSol, 3)} ◎ idle`;
+        const account = E.nativeAccount(state, panelChain(), settings);
+        barTotalEls.sol.textContent = `${E.fmt(account.cash, 3)} ${account.symbol} idle`;
         barTotalEls.sol.classList.remove('pt-green', 'pt-red');
         barTotalEls.pct.textContent = locked > 0 ? `${E.fmt(locked, 3)} armed` : '';
       } else {
         barTotalEls.count.textContent = `${rows.length} position${rows.length === 1 ? '' : 's'}${locked > 0 ? ` · ${E.fmt(locked, 3)} locked` : ''}`;
-        barTotalEls.sol.textContent = `${sign}${E.fmt(summary.pnlSol, 3)} SOL`;
-        barTotalEls.pct.textContent = `${sign}${summary.pnlPct.toFixed(1)}%`;
+        const parts = [];
+        for (const [chain, currency] of [['solana', 'SOL'], ['bsc', 'BNB']]) {
+          if (!chainRows[chain].length) continue;
+          const current = summaries[chain];
+          parts.push(`${current.pnlSol >= 0 ? '+' : ''}${E.fmt(current.pnlSol, 3)} ${currency}`);
+        }
+        barTotalEls.sol.textContent = parts.join(' · ');
+        barTotalEls.pct.textContent = rows.length && (chainRows.solana.length === 0 || chainRows.bsc.length === 0)
+          ? `${(summaries[chainRows.bsc.length ? 'bsc' : 'solana'].pnlSol >= 0) ? '+' : ''}${summaries[chainRows.bsc.length ? 'bsc' : 'solana'].pnlPct.toFixed(1)}%`
+          : 'separate ledgers';
         for (const node of [barTotalEls.sol, barTotalEls.pct]) {
-          node.classList.toggle('pt-green', summary.up);
-          node.classList.toggle('pt-red', !summary.up);
+          node.classList.remove('pt-green', 'pt-red');
         }
       }
     }
@@ -7252,7 +7330,7 @@
     const sign = row.pnlSol >= 0 ? '+' : '';
     chip.mint = row.mint;
     chip.sym.textContent = row.symbol;
-    chip.pnl.textContent = `${sign}${E.fmt(row.pnlSol, 3)}`;
+    chip.pnl.textContent = `${sign}${E.fmt(row.pnlNative, 3)} ${row.currency}`;
     chip.pct.textContent = `${sign}${row.pnlPct.toFixed(1)}%`;
 
     // Color by TOTAL position P&L, never by the direction of the last tick.
@@ -7261,8 +7339,8 @@
     chip.el.classList.toggle('active', row.active);
     chip.el.classList.toggle('stale', row.stale);
     chip.el.title = row.stale
-      ? `${row.symbol} — ${E.fmt(row.valueSol, 4)} SOL · price not live yet`
-      : `${row.symbol} — ${E.fmt(row.valueSol, 4)} SOL · click to open its chart`;
+      ? `${row.symbol} — ${E.fmt(row.valueNative, 4)} ${row.currency} · price not live yet`
+      : `${row.symbol} — ${E.fmt(row.valueNative, 4)} ${row.currency} · click to open its chart`;
 
     if (chip.lastPnl !== null && row.pnlSol !== chip.lastPnl) {
       const cls = row.up ? 'pt-flash-up' : 'pt-flash-down';
@@ -7571,11 +7649,12 @@
     // "I got in at 240K" is how the entry is actually discussed, so the card
     // shows the market cap at entry whenever the cap is known.
     posEls.entry.textContent = entryText(mark.avgEntry);
-    posEls.value.textContent = `${E.fmt(mark.valueSol, 4)} SOL`;
+    const currency = pos.currency || (pos.chain === 'bsc' || pos.chain === 'bnb' ? 'BNB' : 'SOL');
+    posEls.value.textContent = `${E.fmt(mark.valueSol, 4)} ${currency}`;
 
     const sign = mark.pnlSol >= 0 ? '+' : '';
     posEls.pnl.textContent =
-      `${sign}${E.fmt(mark.pnlSol)} SOL (${mark.pnlPct.toFixed(1)}%)` +
+      `${sign}${E.fmt(mark.pnlSol)} ${currency} (${mark.pnlPct.toFixed(1)}%)` +
       (mark.pnlUsd !== null ? ` · ${E.fmtUsd(mark.pnlUsd)}` : '');
     posEls.pnl.classList.toggle('pt-green', mark.up);
     posEls.pnl.classList.toggle('pt-red', !mark.up);
@@ -7746,15 +7825,15 @@
     // Rebuilding the card on every heartbeat re-ran its entry animation —
     // the reported "blinking". Same result: only the ago-text updates,
     // in place; the card itself renders ONCE per close.
-    const key = `${closed.kind}·${closed.closedAt}·${closed.pnlSol}`;
+    const key = `${closed.kind}·${closed.closedAt}·${closed.pnlNative}`;
     if (key === closedRenderKey && els.closed.childNodes.length) {
       const agoMeta = els.closed.querySelector('.pt-closed-meta');
-      if (agoMeta) agoMeta.textContent = `Returned ${E.fmt(closed.returnedSol, 4)} SOL · ${closedAgo(closed.closedAt)}`;
+      if (agoMeta) agoMeta.textContent = `Returned ${E.fmt(closed.returnedNative, 4)} ${closed.currency} · ${closedAgo(closed.closedAt)}`;
       return;
     }
     closedRenderKey = key;
 
-    const sign = closed.pnlSol >= 0 ? '+' : '';
+    const sign = closed.pnlNative >= 0 ? '+' : '';
     const pctSign = closed.pnlPct >= 0 ? '+' : '';
     const badge = closed.kind === 'round' ? 'POSITION CLOSED' : 'PARTIAL EXIT';
 
@@ -7811,12 +7890,12 @@
     head.appendChild(right);
 
     const pnl = document.createElement('div');
-    pnl.className = `pt-closed-pnl ${closed.pnlSol >= 0 ? 'pt-green' : 'pt-red'}`;
-    pnl.textContent = `${sign}${E.fmt(closed.pnlSol)} SOL (${pctSign}${closed.pnlPct.toFixed(1)}%)`;
+    pnl.className = `pt-closed-pnl ${closed.pnlNative >= 0 ? 'pt-green' : 'pt-red'}`;
+    pnl.textContent = `${sign}${E.fmt(closed.pnlNative)} ${closed.currency} (${pctSign}${closed.pnlPct.toFixed(1)}%)`;
 
     const meta = document.createElement('div');
     meta.className = 'pt-closed-meta';
-    meta.textContent = `Returned ${E.fmt(closed.returnedSol, 4)} SOL · ${closedAgo(closed.closedAt)}`;
+    meta.textContent = `Returned ${E.fmt(closed.returnedNative, 4)} ${closed.currency} · ${closedAgo(closed.closedAt)}`;
 
     card.appendChild(head);
     card.appendChild(pnl);
@@ -9070,8 +9149,8 @@
     onchainLive = false;
     stopTitleSignal();
     if (CM) CM.destroyChartMarkers();
-    sendPadreMarker('paper-marker-clear');
-    sendPadreMarker('paper-lines-clear');
+    sendNativeChart('paper-marker-clear');
+    sendNativeChart('paper-lines-clear');
     sendPadreMarker('gmgn-lines-clear');
     drawnFillIds.clear();
     // One belt-and-braces message that clears every bridge artifact and

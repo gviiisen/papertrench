@@ -2,7 +2,7 @@
 
 <img src="docs/assets/banner.svg" alt="PaperTrench" width="100%">
 
-**Paper-trade Solana memecoins on the sites you already use.**
+**Paper-trade Solana and BSC memecoins on the sites you already use.**
 Real prices. Fake money. A record you can actually learn from.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-FF9D45.svg?style=flat-square)](LICENSE)
@@ -26,7 +26,7 @@ Real prices. Fake money. A record you can actually learn from.
 
 ## What it is
 
-PaperTrench is a Chrome extension that overlays a paper-trading terminal on **Axiom, Padre, Photon, GMGN, BullX, Dexscreener, Birdeye, Jupiter, Pump.fun, Fomo, and Lute**. You trade the real chart, at the real live price, with money that isn't real — then review exactly what you did and why.
+PaperTrench is a Chrome extension that overlays a paper-trading terminal on **Axiom, Padre, Photon, GMGN, BullX, Dexscreener, Birdeye, Jupiter, Pump.fun, Fomo, Lute, and Debot**. Debot token pages support both **Solana (SOL paper account)** and **BSC (BNB paper account)**. You trade the real chart, at the real live price, with money that isn't real — then review exactly what you did and why.
 
 It exists because the usual way people learn this market is to lose money finding out that they chase, oversize, and round-trip their winners. This tells you that in an afternoon instead.
 
@@ -52,7 +52,7 @@ It exists because the usual way people learn this market is to lose money findin
 |---|---|
 | **Live overlay** | Quick-buy presets, % sells, and a P&L that updates on the site's own price feed — event-driven, not polled. |
 | **Positions bar** | Every open position pinned to the top of the page with live P&L. Click one to jump to its chart. |
-| **Native chart fills** | On Padre, your paper buys and sells render as real TradingView markers with average fill/exit lines. |
+| **Native chart fills** | On Padre and Debot, paper buys and sells render on the site's chart with average fill/exit lines; Debot preserves its existing B/S markers. |
 | **Armed buys** | Click buy before a brand-new coin has a quote and the order arms, then fills the instant the first trusted price lands. |
 | **Instant X links** | Opt-in: clicking an X post or profile on a trading site opens it in a kept-warm viewer tab in ~0.5s instead of a ~3.5s cold tab — and hovering a link first prefetches it, making the click near-instant. Costs one muted background x.com tab while enabled; Ctrl/Cmd/middle-click still opens normal tabs. |
 | **Tweet on the buy button** | Opt-in: where a terminal hides the launch tweet behind a held hotkey, PaperTrench puts it on the control your cursor is already on — hover the site's *own* quick-buy pill and the tweet appears in about a tenth of a second, no key held. The card is always placed clear of the pill, never over it. Works where the site's pill is a verified one (Axiom, Padre). |

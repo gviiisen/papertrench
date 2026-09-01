@@ -1,17 +1,18 @@
-> **STATUS: design A — SUPERSEDED as the wallet model, still authoritative as
-> research. Foreign-chain detection is GATED OFF in v3.0.0.**
+> **STATUS: design B is live for Debot Solana + BSC.** Debot uses separate
+> native paper accounts: SOL for Solana and BNB for BSC. Other foreign-chain
+> adapters remain behind `MULTICHAIN_ENABLED = false` until their account and
+> UI contracts are migrated; the historical design-A research below remains
+> useful for their URL and price-routing facts.
 >
 > Terp chose **per-chain native balances** (design B) on 2026-08-06: each chain
 > carries its own paper balance in its own native unit (SOL on Solana, ETH on
 > Base/Ethereum, BNB on BSC), not the single SOL-denominated book with
 > USD-converted foreign fills that this document specifies below.
 >
-> Multichain never shipped — it is in main but absent from the v2.11.0 zip, so
-> no user has written a single foreign-chain fill under design A. Rather than
-> commit users to a model already chosen for replacement, v3.0.0 ships with
-> `MULTICHAIN_ENABLED = false` in `extension/sites.js` (one named switch;
-> `test/chainrouting.test.js` pins the refusal and proves flipping it restores
-> full per-chain detection). Design B lands in the following release.
+> Debot is deliberately exempt from the broad gate because its two supported
+> chains have the complete design-B path: strict URL detection, chain-native
+> quotes, isolated cash accounts, chain-tagged fills/rounds, and native chart
+> markers. See [`specs/debot-solana-bsc.md`](specs/debot-solana-bsc.md).
 >
 > **Everything below stays true and stays needed.** The live URL corpus, the
 > chain-slug → Dexscreener chainId map, the chain-agnostic title and chart

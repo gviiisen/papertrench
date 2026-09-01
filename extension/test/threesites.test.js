@@ -29,8 +29,15 @@ test('all three headline sites have a URL adapter', () => {
 /* ---------------- native chart routing ---------------- */
 
 test('Padre and Axiom both take the native TradingView path', () => {
-  assert.match(content, /NATIVE_TV_SITES = new Set\(\['padre', 'axiom'\]\)/,
+  assert.match(content, /NATIVE_TV_SITES = new Set\(\['padre', 'axiom', 'debot'\]\)/,
     'Axiom loads the same TradingView library as Padre and must use the same path');
+});
+
+test('Debot posts to both native adapters because the site switches chart implementations', () => {
+  assert.match(content, /sendPadreMarker\(type, payload\);[\s\S]{0,320}if \(mapped\) sendPadreMarker\(mapped, payload\)/,
+    'the standard TradingView message and Debot Lightweight twin must both be posted');
+  assert.doesNotMatch(bridge, /if \(\/\(\^\|\\\.\)debot\\\.ai\$\/[\s\S]{0,80}return \[\]/,
+    'Debot must not globally suppress TradingView discovery');
 });
 
 test('no chart decision is hardcoded to Padre alone any more', () => {
@@ -85,7 +92,7 @@ test('GMGN markers are cleared with its lines so a token switch leaves nothing b
 
 test('every headline site has a route for average price lines', () => {
   // Padre + Axiom via the shared native path.
-  assert.match(content, /if \(usesNativeChart\(\)\) \{[\s\S]{0,600}sendPadreMarker\('paper-lines'/,
+  assert.match(content, /if \(usesNativeChart\(\)\) \{[\s\S]{0,1800}sendNativeChart\('paper-lines'/,
     'Padre and Axiom must draw native order lines');
   // GMGN via its own chart manager.
   assert.match(content, /sendPadreMarker\('gmgn-lines'/,

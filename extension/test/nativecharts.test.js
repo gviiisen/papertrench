@@ -201,6 +201,46 @@ function runBridge(opts = {}) {
   // this on mid-test via env.enableAxiom().
   let axiomVisible = Boolean(opts.axiom);
 
+  // ---- Debot visible Lightweight Charts series behind #chart React fiber ----
+  const debotAppliedMarkers = [];
+  const debotPriceLines = [];
+  function makeDebotSeries() {
+    return {
+      seriesType: () => 'Candlestick',
+      priceToCoordinate: (price) => price,
+      setData() {},
+      update() {},
+      setMarkers(markers) {
+        debotAppliedMarkers.length = 0;
+        debotAppliedMarkers.push(...markers);
+      },
+      createPriceLine(options) {
+        const line = {
+          options: { ...options }, removed: false,
+          applyOptions(next) { Object.assign(this.options, next); },
+          remove() { this.removed = true; },
+        };
+        debotPriceLines.push(line);
+        return line;
+      },
+      removePriceLine(line) { if (line) line.removed = true; },
+    };
+  }
+  let debotSeries = makeDebotSeries();
+  const debotHost = {};
+  function attachDebotFiber() {
+    Object.defineProperty(debotHost, '__reactFiber$debot', {
+      value: {
+        return: null, child: null, sibling: null,
+        memoizedState: { memoizedState: { current: debotSeries }, next: null },
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  attachDebotFiber();
+  let debotVisible = Boolean(opts.debot);
+
   // ---- optional screener-row DOM for the chip occlusion tests (O-22) ----
   let panelOverChip = false;
   let rowDomNodes = null;
@@ -231,8 +271,15 @@ function runBridge(opts = {}) {
   }
 
   const doc = {
-    getElementById: (id) => (id === 'global-tv-overlay' && gmgnMounted ? gmgnHost : null),
-    querySelector: (sel) => (axiomVisible && String(sel).includes('iframe[id^="tradingview_"]') ? axiomIframe : null),
+    getElementById: (id) => {
+      if (id === 'global-tv-overlay' && gmgnMounted) return gmgnHost;
+      if (id === 'chart' && debotVisible) return debotHost;
+      return null;
+    },
+    querySelector: (sel) => {
+      if (debotVisible && String(sel) === '#chart') return debotHost;
+      return axiomVisible && String(sel).includes('iframe[id^="tradingview_"]') ? axiomIframe : null;
+    },
     querySelectorAll: (sel) => {
       const s = String(sel);
       if (axiomVisible && s.includes('iframe[id^="tradingview_"]')) return [axiomIframe];
@@ -289,6 +336,7 @@ function runBridge(opts = {}) {
     postMessage(message) { emitted.push(message); },
   };
   win.window = win;
+  if (opts.debotTv) win.tvWidget = axiomWidget;
 
   // Timeouts are collected, not executed: the bridge's retry loops would
   // recurse unboundedly under a synchronous fake. Tests advance them with
@@ -296,7 +344,9 @@ function runBridge(opts = {}) {
   const timeouts = new Map();
   let timeoutSeq = 0;
 
-  const href = opts.href || 'https://gmgn.ai/sol/token/Mint1';
+  const href = opts.href || (opts.debot || opts.debotTv
+    ? 'https://debot.ai/token/bsc/266425_0xeb9e768c42d6f5b08d34980c6f721494372a7777'
+    : 'https://gmgn.ai/sol/token/Mint1');
   // Controllable clock: stress tests need to space batches by tens of
   // milliseconds deterministically. Untouched, it follows real time.
   const RealDate = Date;
@@ -336,6 +386,10 @@ function runBridge(opts = {}) {
     timers,
     mountGmgn: () => { gmgnMounted = true; },
     remountGmgn: () => { gmgnChart = makeGmgnChart(); },
+    debotMarkers: debotAppliedMarkers,
+    debotLines: debotPriceLines,
+    debotSeries: () => debotSeries,
+    remountDebot: () => { debotSeries = makeDebotSeries(); attachDebotFiber(); },
     failGmgnShapes: (n) => { gmgnShapeFailures = n; },
     setAxiomOrderLinePlan: (fn) => { axiomOrderLinePlan = fn; axiomOrderLineCalls = 0; },
     enableAxiom: () => { axiomVisible = true; },
@@ -367,6 +421,83 @@ function runBridge(opts = {}) {
     },
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * Debot visible Lightweight Charts integration
+ * ------------------------------------------------------------------ */
+
+test('Debot merges paper fills with its existing B/S markers and emits visible-series ticks', () => {
+  const env = runBridge({ debot: true });
+  env.runTimers();
+
+  const series = env.debotSeries();
+  series.setData([
+    { time: 1_800_000_000, open: 0.002, high: 0.0022, low: 0.0019, close: 0.0021 },
+    { time: 1_800_060_000, open: 0.0021, high: 0.0024, low: 0.002, close: 0.0023 },
+  ]);
+  const siteMarkers = [
+    { time: 1_800_000_000, position: 'belowBar', color: '#00aa88', shape: 'circle', text: 'B' },
+    { time: 1_800_060_000, position: 'aboveBar', color: '#ee4466', shape: 'circle', text: 'S' },
+  ];
+  series.setMarkers(siteMarkers);
+  env.send('debot-marker', {
+    fillId: 'fill-1', ts: 1_800_060_500_000, side: 'buy', text: 'PT Buy 0.5 BNB',
+  });
+
+  assert.ok(env.debotMarkers.some((m) => m.text === 'B'), 'Debot buy marker is preserved');
+  assert.ok(env.debotMarkers.some((m) => m.text === 'S'), 'Debot sell marker is preserved');
+  assert.ok(env.debotMarkers.some((m) => m.text === 'PT Buy 0.5 BNB'), 'paper fill is merged natively');
+  assert.ok(env.emitted.some((m) => m.type === 'tick' && m.payload?.source === 'debot-chart-bar'),
+    'the visible candlestick series supplies live chart ticks');
+});
+
+test('Debot average lines use Lightweight price lines and recover after chart remount', () => {
+  const env = runBridge({ debot: true });
+  env.runTimers();
+  env.debotSeries().setData([{ time: 1_800_000_000, close: 0.0021 }]);
+  env.send('debot-lines', {
+    enabled: true,
+    axisBasis: 'usd',
+    currentPriceNative: 0.0000035,
+    currentPriceUsd: 0.0021,
+    avgBuyUsd: 0.0015,
+    avgSellUsd: 0.0028,
+  });
+
+  assert.ok(env.debotLines.some((l) => l.options.price === 0.0015 && /Avg Buy/.test(l.options.title)));
+  assert.ok(env.debotLines.some((l) => l.options.price === 0.0028 && /Avg Sell/.test(l.options.title)));
+
+  env.remountDebot();
+  env.runTimers();
+  env.debotSeries().setData([{ time: 1_800_000_060, close: 0.0022 }]);
+  env.runTimers();
+  assert.ok(env.debotLines.filter((l) => !l.removed && /Avg Buy/.test(l.options.title)).length >= 1,
+    'the average-buy line is restored on the replacement chart');
+});
+
+test('Debot also keeps the normal TradingView adapter when that chart is visible', async () => {
+  const mint = 'H6NXABY6J8MKD2HOMS71R7K3FY9DGVFBQHJYUXZN2S2R';
+  const env = runBridge({
+    debotTv: true,
+    href: `https://debot.ai/token/solana/266425_${mint}`,
+  });
+  env.send('paper-axis', { mint, address: mint, symbol: mint });
+  const capability = env.emitted.find((m) => m.type === 'padre-hook-status');
+  assert.equal(capability?.payload?.nativeCapable, true,
+    'Debot must not exclude a visible TradingView widget from discovery');
+
+  env.send('paper-lines', {
+    enabled: true,
+    axisBasis: 'usd',
+    currentPriceNative: 0.001,
+    currentPriceUsd: 0.2,
+    avgBuyUsd: 0.18,
+    avgSellUsd: 0.24,
+  });
+  await microtasks();
+  assert.ok(env.orderLines.some((line) => line.values.setPrice === 0.18));
+  assert.ok(env.orderLines.some((line) => line.values.setPrice === 0.24));
+});
 
 /* ------------------------------------------------------------------ *
  * 1. GMGN async TradingView API

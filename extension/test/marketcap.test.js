@@ -119,8 +119,8 @@ test('a fill confirmation states the market cap it filled at', () => {
   // template itself, which still leads with the amount + cap.
   assert.match(src, /Bought \$\{boughtText\} of \$\{sym\}\$\{atMcap/,
     'a buy toast must report the market cap it filled at');
-  assert.match(src, /: `\$\{E\.fmt\(solAmount, 3\)\} SOL`/,
-    'SOL panels keep the SOL amount in the confirmation');
+  assert.match(src, /: `\$\{E\.fmt\(solAmount, 3\)\} \$\{panelCurrency\(\)\}`/,
+    'native-account panels keep their SOL or BNB amount in the confirmation');
   assert.match(src, /exitMcap \? ` at \$\{fmtMoney\(exitMcap\)\} MC` : ''/,
     'a sell toast must report the market cap it exited at');
 });

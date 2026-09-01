@@ -19,10 +19,16 @@ Kept current for Chrome Web Store review and for anyone auditing the source.
 
 - **Content scripts are narrow.** The trading overlay is injected ONLY into
   the supported trading sites (axiom.trade, padre.gg, tinyastro.io, gmgn.ai,
-  bullx.io, dexscreener.com, birdeye.so, jup.ag, pump.fun, fomo.family, lute.gg).
+  bullx.io, dexscreener.com, birdeye.so, jup.ag, pump.fun, fomo.family,
+  lute.gg, debot.ai).
   (Earlier alphas
   injected everywhere; fixed as DEFECTS.md O-09 and enforced by
   `scripts/preflight.sh` and a manifest test.)
+- **Debot.ai (Solana + BSC).** The same paper overlay runs on Debot token
+  pages. It reads the visible chart's public price updates and adds simulated
+  fill markers and average-price lines to that chart; it does not connect a
+  wallet, sign, submit, or alter a real order. Solana uses the virtual SOL
+  account and BSC uses a separate virtual BNB account.
 - **Paper perpetual futures (v3.0.0).** A second, separate content-script
   entry loads the perps stack on the two venues it simulates:
   **app.hyperliquid.xyz** and jup.ag. It is the same paper-trading engine —

@@ -2,7 +2,7 @@
   "name": "papertrench",
   "version": "3.18.0",
   "private": true,
-  "description": "Paper-trade Solana memecoins on Axiom, Padre, Photon, GMGN, BullX and more.",
+  "description": "Paper-trade Solana and BSC memecoins on Debot, Axiom, Padre, GMGN and more.",
   "scripts": {
     "test": "node --test"
   },

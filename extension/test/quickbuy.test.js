@@ -34,23 +34,23 @@ test('preset taps route through the shared buy path when instant is on', () => {
 
 /* ---------------- foreign-chain dollar quick buys ---------------- */
 
-test('foreign-chain panels quick-buy in DOLLARS at the recorded rate', () => {
+test('legacy foreign-chain panels use dollars, while BSC uses its native BNB account', () => {
   // Venue truth, read off the live BNB token panel 2026-08-05: fomo's own
   // quick buys are $10/$100/$500/$1000 with a $-prefixed amount box — every
   // non-Solana chain is priced in USD there. The paper panel mirrors the
   // venue: chips carry panel units, requestBuy converts ONCE at the
   // token's RECORDED solUsdAtResolve rate, and a missing rate is an honest
   // refusal — never a guessed conversion.
-  assert.match(content, /return Boolean\(token && token\.chain && token\.chain !== 'solana'\);/,
-    'the dollar panel is exactly the foreign-chain panel');
+  assert.match(content, /token\.chain !== 'solana' && token\.chain !== 'bsc' && token\.chain !== 'bnb'/,
+    'BSC must bypass the legacy dollar-to-SOL conversion panel');
   assert.match(content, /const rate = Number\(token && token\.solUsdAtResolve\);/,
     'conversion uses the recorded rate, not a fresh guess');
   assert.match(content, /solAmount = amt \/ rate;/,
     'the tapped dollars become SOL book units before the engine sees them');
   assert.match(content, /No SOL\/USD rate for this chain — paper buy refused/,
     'a rateless record refuses instead of filling');
-  assert.match(content, /usdMode \? `\$\$\{a\}` : `\$\{a\} SOL`/,
-    'chips print the venue currency ($10, not 10 SOL) on foreign chains');
+  assert.match(content, /usdMode \? `\$\$\{a\}` : `\$\{a\} \$\{panelCurrency\(\)\}`/,
+    'chips print dollars on legacy foreign chains and SOL/BNB on native-account chains');
 });
 
 test('a dollar buy on a still-resolving token arms in dollars and converts at fire time', () => {

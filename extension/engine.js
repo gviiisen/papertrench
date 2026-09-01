@@ -4,8 +4,10 @@
  * the content script and the dashboard both load this and drive it with
  * storage reads/writes.
  *
- * All prices in SOL (priceNative). USD values are derived per-trade with the
- * priceUsd captured at that moment.
+ * Prices are in the token chain's native currency (SOL on Solana, BNB on
+ * BSC). USD values are derived per-trade with the priceUsd captured at that
+ * moment. Legacy `*Sol` fields remain readable for existing Solana wallets;
+ * new multichain records also carry explicit `*Native` fields and currency.
  */
 (() => {
   'use strict';
@@ -34,6 +36,7 @@
 
   const DEFAULT_SETTINGS = {
     balanceStartSol: 10,
+    balanceStartBnb: 10,
     presetsBuy: [0.1, 0.5, 1, 2],
     // Foreign-chain panels quick-buy in DOLLARS (fomo's own ladder on its
     // EVM chains, read off the live site 2026-08-05). Separate key so a
@@ -295,19 +298,28 @@
   }
 
   function defaultState(settings = DEFAULT_SETTINGS) {
+    const startSol = Number(settings.balanceStartSol) || DEFAULT_SETTINGS.balanceStartSol;
+    const startBnb = Number(settings.balanceStartBnb) || DEFAULT_SETTINGS.balanceStartBnb;
     return {
       version: 1,
       // Monotonic write counter bumped by the content script on every state
       // write. A fresh wallet starts at 0; a writer holding an older seq can
       // tell it has been overtaken and adopt instead of clobber.
       seq: 0,
-      cashSol: settings.balanceStartSol,
+      cashSol: startSol,
       // D-06: the birth balance is SNAPSHOT here. settings.balanceStartSol
       // names what the NEXT wallet starts with; startSol is what THIS wallet
       // actually started with. Every "% return" denominator reads the
       // anchor (anchorStartSol) so editing the setting mid-wallet changes
       // the next wallet, never this wallet's history.
-      startSol: settings.balanceStartSol,
+      startSol,
+      // Design B multichain wallet: one native-currency account per chain.
+      // The Solana record mirrors cashSol/startSol for backwards compatibility;
+      // BSC is independent and can never debit or credit the SOL book.
+      accounts: {
+        solana: { chain: 'solana', symbol: 'SOL', cash: startSol, start: startSol },
+        bsc: { chain: 'bsc', symbol: 'BNB', cash: startBnb, start: startBnb },
+      },
       startedAt: Date.now(),
       positions: {},   // mint -> position
       // mint -> armed take-profit / stop-loss orders. Kept beside positions
@@ -324,12 +336,73 @@
       rounds: [],      // closed round trips, newest first
       journal: [],     // every fill, newest first
       stats: { totalBuys: 0, totalSells: 0, realizedPnlSol: 0, feesPaidSol: 0 },
+      statsByChain: {
+        solana: { currency: 'SOL', realizedPnlNative: 0, feesPaidNative: 0 },
+        bsc: { currency: 'BNB', realizedPnlNative: 0, feesPaidNative: 0 },
+      },
       // The one deliberate exception to gamify's derived-only rule: a game
       // SESSION the user explicitly started ({ id, startedAt } or null).
       // Results are still derived from the rounds closed since startedAt —
       // this pointer only says which game is on and since when.
       activeGame: null,
     };
+  }
+
+  const NATIVE_CURRENCY_BY_CHAIN = { solana: 'SOL', bsc: 'BNB' };
+
+  function normalizedTradeChain(chain) {
+    return chain === 'bsc' || chain === 'bnb' ? 'bsc' : 'solana';
+  }
+
+  /** Upgrade a legacy wallet lazily and return its chain-native account. */
+  function nativeAccount(state, chain, settings) {
+    if (!state || typeof state !== 'object') return null;
+    const id = normalizedTradeChain(chain);
+    const symbol = NATIVE_CURRENCY_BY_CHAIN[id];
+    if (!state.accounts || typeof state.accounts !== 'object') state.accounts = {};
+    if (!state.accounts[id]) {
+      const configured = id === 'solana'
+        ? Number(state.cashSol)
+        : Number(settings && settings.balanceStartBnb);
+      const fallback = id === 'solana'
+        ? (Number(state.cashSol) || Number(state.startSol) || DEFAULT_SETTINGS.balanceStartSol)
+        : (Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_SETTINGS.balanceStartBnb);
+      const start = id === 'solana'
+        ? (Number(state.startSol) || fallback)
+        : (Number(settings && settings.balanceStartBnb) || fallback);
+      state.accounts[id] = { chain: id, symbol, cash: fallback, start };
+    }
+    const account = state.accounts[id];
+    account.chain = id;
+    account.symbol = symbol;
+    // cashSol remains a live compatibility field across the existing UI and
+    // persisted-state tests. Until every Solana caller migrates, an explicit
+    // change there is authoritative for the mirrored Solana account.
+    const explicitLegacySol = id === 'solana'
+      && Object.prototype.hasOwnProperty.call(state, 'cashSol');
+    if (explicitLegacySol && !Object.is(Number(state.cashSol), Number(account.cash))) {
+      account.cash = Number(state.cashSol);
+    }
+    if (!explicitLegacySol && !Number.isFinite(Number(account.cash))) account.cash = 0;
+    if (!Number.isFinite(Number(account.start))) account.start = Number(account.cash) || 0;
+    return account;
+  }
+
+  function nativeStats(state, chain) {
+    const id = normalizedTradeChain(chain);
+    if (!state.statsByChain || typeof state.statsByChain !== 'object') state.statsByChain = {};
+    if (!state.statsByChain[id]) {
+      state.statsByChain[id] = {
+        currency: NATIVE_CURRENCY_BY_CHAIN[id],
+        realizedPnlNative: 0,
+        feesPaidNative: 0,
+      };
+    }
+    return state.statsByChain[id];
+  }
+
+  function syncLegacySolAccount(state, account) {
+    if (account && account.chain === 'solana') state.cashSol = account.cash;
   }
 
   /* ---------------- game sessions (GAMIFY.md v2, Gaming Mode) ----------------
@@ -540,9 +613,13 @@
    * Buy `solAmount` gross SOL of the token. Returns {trade, state} or throws.
    */
   function buy(state, settings, o) {
-    const sol = Number(o.solAmount);
+    const chain = o.chain || 'solana';
+    const accountChain = normalizedTradeChain(chain);
+    const account = nativeAccount(state, chain, settings);
+    const currency = account.symbol;
+    const sol = Number(o.nativeAmount !== undefined ? o.nativeAmount : o.solAmount);
     const flat = txCostSol(settings);
-    if (!(sol > 0)) throw new Error('Buy amount must be > 0 SOL');
+    if (!(sol > 0)) throw new Error(`Buy amount must be > 0 ${currency}`);
 
     // Fee FIRST, price second. The constant-product curve must be walked with
     // the SOL that actually reaches the pool, not the gross order: the fee is
@@ -559,10 +636,10 @@
       solIn: net,
     });
     if (!(px > 0)) throw new Error('No live price available');
-    if (sol + flat > state.cashSol + EPS) {
+    if (sol + flat > account.cash + EPS) {
       throw new Error(flat > 0
-        ? `Insufficient paper balance for ${fmt(sol)} SOL + ${fmt(flat)} SOL tx costs (${fmt(state.cashSol)} SOL left)`
-        : `Insufficient paper balance (${fmt(state.cashSol)} SOL left)`);
+        ? `Insufficient paper balance for ${fmt(sol)} ${currency} + ${fmt(flat)} ${currency} tx costs (${fmt(account.cash)} ${currency} left)`
+        : `Insufficient paper balance (${fmt(account.cash)} ${currency} left)`);
     }
 
     const qty = net / px;
@@ -586,10 +663,10 @@
         openedAt: o.ts,
         lastPriceNative: px,
         lastPriceUsd: o.priceUsd || null,
-        // Multichain: the chain the token lives on ('solana' default). Off-
-        // Solana fills price in derived SOL (docs/MULTICHAIN.md) and the
-        // batch poller needs the chain to re-quote the right family.
-        chain: o.chain || 'solana',
+        // The token chain controls both its native account and the resolver
+        // family used by the off-screen batch poller.
+        chain,
+        currency,
       };
     }
     // Upgrade a legacy open position in place so replays can still be attached
@@ -626,9 +703,12 @@
     pos.lastPriceNative = px;
     pos.lastPriceUsd = o.priceUsd || pos.lastPriceUsd;
 
-    state.cashSol -= sol + flat;
+    account.cash -= sol + flat;
+    syncLegacySolAccount(state, account);
     state.stats.totalBuys += 1;
-    state.stats.feesPaidSol += fee + flat;
+    const chainStats = nativeStats(state, accountChain);
+    chainStats.feesPaidNative += fee + flat;
+    if (accountChain === 'solana') state.stats.feesPaidSol += fee + flat;
 
     const trade = {
       id: tradeId(o.ts),
@@ -647,6 +727,11 @@
       solNet: net,
       mcap: o.mcap || null,
       chain: pos.chain || o.chain || 'solana',
+      currency,
+      nativeGross: sol,
+      feeNative: fee,
+      txCostNative: flat,
+      nativeNet: net,
     };
     // Foreign-chain panels order in dollars; the tapped amount is recorded
     // so receipts echo the order as placed, not just its SOL conversion.
@@ -696,6 +781,10 @@
     // can genuinely net negative — you paid gas to exit a worthless bag,
     // which is precisely the lesson worth learning on paper.
     const net = gross - fee - flat;
+    const chain = pos.chain || 'solana';
+    const accountChain = normalizedTradeChain(chain);
+    const account = nativeAccount(state, chain, settings);
+    const currency = account.symbol;
 
     const costShare = pos.costSol * (qty / pos.qty);
     const pnl = net - costShare;
@@ -705,10 +794,16 @@
     pos.lastPriceNative = px;
     pos.lastPriceUsd = o.priceUsd || pos.lastPriceUsd;
 
-    state.cashSol += net;
+    account.cash += net;
+    syncLegacySolAccount(state, account);
     state.stats.totalSells += 1;
-    state.stats.feesPaidSol += fee + flat;
-    state.stats.realizedPnlSol += pnl;
+    const chainStats = nativeStats(state, accountChain);
+    chainStats.feesPaidNative += fee + flat;
+    chainStats.realizedPnlNative += pnl;
+    if (accountChain === 'solana') {
+      state.stats.feesPaidSol += fee + flat;
+      state.stats.realizedPnlSol += pnl;
+    }
 
     const trade = {
       id: tradeId(o.ts),
@@ -728,6 +823,12 @@
       pnlSol: pnl,
       mcap: o.mcap || null,
       chain: pos.chain || 'solana',
+      currency,
+      nativeGross: gross,
+      feeNative: fee,
+      txCostNative: flat,
+      nativeNet: net,
+      pnlNative: pnl,
     };
     // An exit fired by an armed order records what was ASKED for beside what
     // the market GAVE. Without both numbers the journal quietly implies the
@@ -805,9 +906,13 @@
       closedAt: ts,
       heldMs: ts - pos.openedAt,
       chain: pos.chain || 'solana',
+      currency: pos.currency || NATIVE_CURRENCY_BY_CHAIN[normalizedTradeChain(pos.chain)],
       investedSol: pos.investedSol,
       returnedSol: returned,
       pnlSol: returned - pos.investedSol,
+      investedNative: pos.investedSol,
+      returnedNative: returned,
+      pnlNative: returned - pos.investedSol,
       pnlPct: pos.investedSol > 0 ? (returned / pos.investedSol - 1) * 100 : 0,
       peakPnlSol: pos.peakPnlSol,
       troughPnlSol: pos.troughPnlSol,
@@ -1023,13 +1128,17 @@
    */
   function guardCheck(state, settings, o) {
     const now = Number(o && o.now) || Date.now();
-    const sol = Number(o && o.solAmount) || 0;
+    const chain = normalizedTradeChain(o && o.chain);
+    const currency = NATIVE_CURRENCY_BY_CHAIN[chain];
+    const sol = Number(o && (o.nativeAmount !== undefined ? o.nativeAmount : o.solAmount)) || 0;
 
     if (settings.guardTiltEnabled) {
       const losses = clamp(Number(settings.guardTiltLosses) || 4, 2, 10);
       const coolMs = clamp(Number(settings.guardTiltMinutes) || 10, 1, 120) * 60_000;
-      const recent = (state.rounds || []).slice(0, losses);
-      if (recent.length >= losses && recent.every((r) => Number(r.pnlSol) < 0)) {
+      const recent = (state.rounds || [])
+        .filter((r) => normalizedTradeChain(r.chain) === chain)
+        .slice(0, losses);
+      if (recent.length >= losses && recent.every((r) => Number(r.pnlNative ?? r.pnlSol) < 0)) {
         const remaining = (Number(recent[0].closedAt) || 0) + coolMs - now;
         if (remaining > 0) {
           return {
@@ -1042,19 +1151,19 @@
     }
 
     if (Number(settings.guardMaxPositionPct) > 0 && sol > 0) {
-      const eq = equitySol(state);
+      const eq = equityNative(state, chain);
       const cap = eq * (Number(settings.guardMaxPositionPct) / 100);
       if (sol > cap + EPS) {
         return {
           ok: false, reason: 'size',
-          message: 'Size guard: ' + fmt(sol) + ' SOL is over '
+          message: 'Size guard: ' + fmt(sol) + ' ' + currency + ' is over '
             + settings.guardMaxPositionPct + '% of your ' + fmt(eq)
-            + ' SOL book (max ' + fmt(cap) + ' — Settings → Guardrails)',
+            + ' ' + currency + ' book (max ' + fmt(cap) + ' — Settings → Guardrails)',
         };
       }
     }
 
-    if (Number(settings.guardDailyLossSol) > 0) {
+    if (chain === 'solana' && Number(settings.guardDailyLossSol) > 0) {
       const dayStart = new Date(now);
       dayStart.setHours(0, 0, 0, 0);
       const start = dayStart.getTime();
@@ -1126,9 +1235,16 @@
   }
 
   function equitySol(state) {
-    let eq = state.cashSol;
+    return equityNative(state, 'solana');
+  }
+
+  function equityNative(state, chain) {
+    const normalized = normalizedTradeChain(chain);
+    const account = nativeAccount(state, normalized);
+    let eq = account ? Number(account.cash) : 0;
     for (const mint of Object.keys(state.positions)) {
       const p = state.positions[mint];
+      if (normalizedTradeChain(p.chain) !== normalized) continue;
       eq += p.qty * (p.lastPriceNative || 0);
     }
     return eq;
@@ -2352,29 +2468,45 @@
       (r) => r.mint === mint && Number(r.closedAt) === Number(sell.ts)
     );
     if (round) {
+      const chain = normalizedTradeChain(round.chain);
+      const currency = chain === 'bsc' ? 'BNB' : 'SOL';
       return {
         kind: 'round',
+        chain,
+        currency,
         symbol: round.symbol || sell.symbol || '',
         closedAt: round.closedAt,
         pnlSol: Number(round.pnlSol) || 0,
+        pnlNative: Number(round.pnlNative ?? round.pnlSol) || 0,
         pnlPct: Number(round.pnlPct) || 0,
         returnedSol: Number(round.returnedSol) || 0,
+        returnedNative: Number(round.returnedNative ?? round.returnedSol) || 0,
         investedSol: Number(round.investedSol) || 0,
+        investedNative: Number(round.investedNative ?? round.investedSol) || 0,
       };
     }
 
     const pnlSol = Number(sell.pnlSol) || 0;
     const returnedSol = Number(sell.solNet) || 0;
+    const chain = normalizedTradeChain(sell.chain);
+    const currency = chain === 'bsc' ? 'BNB' : 'SOL';
+    const pnlNative = Number(sell.pnlNative ?? sell.pnlSol) || 0;
+    const returnedNative = Number(sell.nativeNet ?? sell.solNet) || 0;
     // sell.pnlSol = net proceeds - cost basis closed by this sell.
     const closedCostSol = returnedSol - pnlSol;
     return {
       kind: 'partial',
+      chain,
+      currency,
       symbol: sell.symbol || '',
       closedAt: sell.ts,
       pnlSol,
+      pnlNative,
       pnlPct: closedCostSol > 0 ? (pnlSol / closedCostSol) * 100 : 0,
       returnedSol,
+      returnedNative,
       investedSol: closedCostSol,
+      investedNative: returnedNative - pnlNative,
     };
   }
 
@@ -2454,6 +2586,7 @@
     endGame,
     GAME_IDS,
     resetState,
+    nativeAccount,
     buy,
     sell,
     // Exported so the panel can plan an exit against the SAME flat cost the
@@ -2474,6 +2607,7 @@
     markPosition,
     unrealizedPnl,
     equitySol,
+    equityNative,
     equityCurvePoints,
     stepOf,
     derivedBirthSol,

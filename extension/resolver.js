@@ -125,11 +125,15 @@
       // robinhood). Jupiter and the Solana pair lookup are SKIPPED, not
       // failed — they can only answer for Solana. The SOL/USD rate rides
       // along so the record's SOL price is derived and recorded honestly.
-      var foreign = await Promise.all([
-        getJson(BASE + '/tokens/' + address),
-        solUsd().catch(function () { return 0; }),
-      ]);
-      var record = Q.tokenFromPayload(foreign[0], address, { chain: chain, solUsd: foreign[1] });
+      var nativeBsc = chain === 'bsc' || chain === 'bnb';
+      var foreign = nativeBsc
+        ? [await getJson(BASE + '/tokens/' + address), 0]
+        : await Promise.all([
+          getJson(BASE + '/tokens/' + address),
+          solUsd().catch(function () { return 0; }),
+        ]);
+      var record = Q.tokenFromPayload(foreign[0], address,
+        nativeBsc ? { chain: chain } : { chain: chain, solUsd: foreign[1] });
       if (record) {
         if (!record.mint) record.mint = address;
         cachePut(record);
@@ -171,11 +175,15 @@
     // chain-filtered /tokens/ path it resolved through — Jupiter and the
     // Solana pair endpoint can never know it.
     if (token.chain && token.chain !== 'solana') {
-      var foreign = await Promise.all([
-        getJson(BASE + '/tokens/' + token.mint),
-        solUsd().catch(function () { return 0; }),
-      ]);
-      var record = Q.tokenFromPayload(foreign[0], token.mint, { chain: token.chain, solUsd: foreign[1] });
+      var nativeBsc = token.chain === 'bsc' || token.chain === 'bnb';
+      var foreign = nativeBsc
+        ? [await getJson(BASE + '/tokens/' + token.mint), 0]
+        : await Promise.all([
+          getJson(BASE + '/tokens/' + token.mint),
+          solUsd().catch(function () { return 0; }),
+        ]);
+      var record = Q.tokenFromPayload(foreign[0], token.mint,
+        nativeBsc ? { chain: token.chain } : { chain: token.chain, solUsd: foreign[1] });
       if (record) { cachePut(record); return record; }
       return null;
     }
@@ -233,8 +241,10 @@
       var chain = (chainByMint && chainByMint[unique[g]]) || 'solana';
       (groups[chain] = groups[chain] || []).push(unique[g]);
     }
-    var anyForeign = Object.keys(groups).some(function (c) { return c !== 'solana'; });
-    var rate = anyForeign ? await solUsd().catch(function () { return 0; }) : 0;
+    var needsSolConversion = Object.keys(groups).some(function (c) {
+      return c !== 'solana' && c !== 'bsc' && c !== 'bnb';
+    });
+    var rate = needsSolConversion ? await solUsd().catch(function () { return 0; }) : 0;
 
     var out = {};
     var chainNames = Object.keys(groups);
@@ -248,7 +258,10 @@
       var payloads = await Promise.all(chunks.map(function (chunk) {
         return getJson(BASE + '/tokens/' + chunk.join(','), 6000);
       }));
-      var parseOpts = chainName === 'solana' ? null : { chain: chainName, solUsd: rate };
+      var parseOpts = chainName === 'solana' ? null
+        : ((chainName === 'bsc' || chainName === 'bnb')
+          ? { chain: chainName }
+          : { chain: chainName, solUsd: rate });
       for (var k = 0; k < payloads.length; k++) {
         var parsed = Q.pricesFromBatch(payloads[k], parseOpts);
         for (var mint in parsed) {

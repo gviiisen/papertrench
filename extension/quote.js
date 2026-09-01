@@ -133,19 +133,17 @@
   /**
    * Normalize one Dexscreener pair into our token record, or null if unusable.
    *
-   * Multichain (`opts.chain` = fomo slug, `opts.solUsd` = SOL/USD rate): on a
-   * non-Solana chain the pair's priceNative is in that chain's gas token and
-   * is DISCARDED. The record's priceNative — the number the SOL-denominated
-   * book trades in — is derived as priceUsd / solUsd, and the rate used is
-   * RECORDED on the record (solUsdAtResolve). No usable rate → null, never a
-   * guess: a wrong rate silently corrupts every fill downstream.
+   * BSC uses design-B native accounting: Dexscreener's priceNative is BNB and
+   * remains BNB all the way into the fill engine. Other foreign chains retain
+   * the older gated SOL-conversion path until their own native accounts land.
    */
   function normalizePair(pair, fallbackAddress, opts) {
     if (!pair) return null;
     const chain = (opts && opts.chain) || 'solana';
     const foreign = chain !== 'solana';
+    const nativeBsc = chain === 'bsc' || chain === 'bnb';
     const rawPrice = Number(pair.priceNative);
-    if (!foreign && !(rawPrice > 0)) return null;
+    if ((!foreign || nativeBsc) && !(rawPrice > 0)) return null;
 
     const requested = typeof fallbackAddress === 'string'
       && (BASE58_RE.test(fallbackAddress) || EVM_RE.test(fallbackAddress))
@@ -174,7 +172,9 @@
     const usdOk = Number.isFinite(priceUsd) && priceUsd > 0;
     let priceNative;
     let solUsdAtResolve = null;
-    if (foreign) {
+    if (nativeBsc) {
+      priceNative = isQuote ? 1 / rawPrice : rawPrice;
+    } else if (foreign) {
       const rate = Number(opts && opts.solUsd);
       if (!usdOk || !(rate > 0)) return null;
       priceNative = priceUsd / rate;
@@ -196,6 +196,7 @@
       priceSource: 'resolver',
       resolvedAt: Date.now(),
       chain: chain,
+      nativeSymbol: nativeBsc ? 'BNB' : (chain === 'solana' ? 'SOL' : null),
       solUsdAtResolve: solUsdAtResolve,
       // F-55: surfaced so a drained pool can be told from a trading one. A
       // rug empties liquidity; a real runner's pool deepens. Null when the
@@ -1347,6 +1348,8 @@
 
       rows.push({
         mint,
+        chain: pos.chain === 'bsc' || pos.chain === 'bnb' ? 'bsc' : 'solana',
+        currency: pos.chain === 'bsc' || pos.chain === 'bnb' ? 'BNB' : 'SOL',
         symbol: pos.symbol || shortAddress(mint),
         site: pos.site || null,
         pairAddress: pos.pairAddress || null,
@@ -1354,6 +1357,8 @@
         priceNative: mark.price,
         valueSol: mark.valueSol,
         pnlSol: mark.pnlSol,
+        valueNative: mark.valueSol,
+        pnlNative: mark.pnlSol,
         pnlPct: mark.pnlPct,
         up: mark.up,
         openedAt: Number(pos.openedAt) || 0,

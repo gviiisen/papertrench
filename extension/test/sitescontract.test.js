@@ -26,6 +26,7 @@ const ROOT = path.join(__dirname, '..');
 const SITES = fs.readFileSync(path.join(ROOT, 'sites.js'), 'utf8');
 
 const MINT = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263';
+const BSC_TOKEN = '0xeb9e768c42d6f5b08d34980c6f721494372a7777';
 
 /** The fields sites.js PROMISES on a detection record. Adding one is safe;
  *  removing or renaming one breaks a consumer that cannot test for it. */
@@ -59,7 +60,38 @@ const PAGES = [
   ['fomo', `https://fomo.family/tokens/solana/${MINT}`],
   ['pumpfun', `https://pump.fun/coin/${MINT}`],
   ['lute', `https://lute.gg/trade/${MINT}`],
+  ['debot', `https://debot.ai/token/solana/${MINT}`],
 ];
+
+test('Debot detects canonical and numeric-prefixed token routes on Solana and BSC', () => {
+  const cases = [
+    [`https://debot.ai/token/solana/${MINT}`, 'solana', MINT],
+    [`https://debot.ai/token/solana/266425_${MINT}`, 'solana', MINT],
+    [`https://debot.ai/token/bsc/${BSC_TOKEN}`, 'bsc', BSC_TOKEN],
+    [`https://debot.ai/token/bsc/266425_${BSC_TOKEN}`, 'bsc', BSC_TOKEN],
+  ];
+  for (const [href, chain, address] of cases) {
+    const { site, token } = detectAt(href);
+    assert.equal(site.id, 'debot', `${href} must route to Debot`);
+    assert.deepEqual(
+      token && { kind: token.kind, address: token.address, chain: token.chain },
+      { kind: 'mint', address, chain },
+      `${href} must preserve its own chain and token address`,
+    );
+  }
+});
+
+test('Debot refuses chain/address shape mismatches and utility routes', () => {
+  for (const href of [
+    `https://debot.ai/token/solana/${BSC_TOKEN}`,
+    `https://debot.ai/token/bsc/${MINT}`,
+    'https://debot.ai/monitor',
+  ]) {
+    const { site, token } = detectAt(href);
+    assert.equal(site.id, 'debot');
+    assert.equal(token, null, `${href} is not a valid Debot token page`);
+  }
+});
 
 test('every shipped adapter detects a token page into the promised shape', () => {
   for (const [id, href] of PAGES) {

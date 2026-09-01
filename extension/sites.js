@@ -439,6 +439,30 @@
         return m ? { kind: 'mint', address: m[1], chain: 'solana' } : null;
       },
     },
+    {
+      id: 'debot',
+      name: 'Debot',
+      tokenUrl: (mint, pairAddress, chain) => 'https://debot.ai/token/'
+        + ((chain || 'solana') === 'bsc' ? 'bsc' : 'solana') + '/' + mint,
+      match: (h) => /(^|\.)debot\.ai$/.test(h),
+      // Debot's SPA emits both canonical token links and pool-qualified links:
+      //   /token/bsc/0x…
+      //   /token/bsc/266425_0x…
+      // The numeric prefix identifies the market instance, not the contract.
+      // Keep the address validator chain-specific so a hex token can never be
+      // sent to the Solana resolver (or a base58 mint to BSC).
+      detect: () => {
+        const m = location.pathname.match(/^\/token\/(solana|sol|bsc)\/(?:\d+_)?([^/?#]+)(?:$|[/?#])/i);
+        if (!m) return null;
+        const slug = m[1].toLowerCase();
+        const chain = slug === 'bsc' ? 'bsc' : 'solana';
+        const address = m[2];
+        const shapeOk = chain === 'solana'
+          ? SOLANA_ADDRESS_RE.test(address)
+          : EVM_ADDRESS_RE.test(address);
+        return shapeOk ? { kind: 'mint', address, chain } : null;
+      },
+    },
   ];
 
   function currentSite() {

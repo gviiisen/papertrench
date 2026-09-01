@@ -837,7 +837,8 @@ test('O-03/C-18: disabling the overlay tears down chart, title, chain and bridge
   assert.match(block, /CM\.destroyChartMarkers\(\)/,
     'the SVG overlay, its observers and scan timer must be destroyed');
   for (const msg of ['paper-marker-clear', 'paper-lines-clear', 'gmgn-lines-clear', 'standdown']) {
-    assert.ok(block.includes(`sendPadreMarker('${msg}')`),
+    const sender = msg.startsWith('paper-') ? 'sendNativeChart' : 'sendPadreMarker';
+    assert.ok(block.includes(`${sender}('${msg}')`),
       `disableOverlay must send ${msg} so native chart drawings disappear`);
   }
   assert.match(block, /token = null;/,
