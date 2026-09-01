@@ -97,7 +97,6 @@
   // D-42: shared with the row-snipe adoption below (declared here so the
   // detectLoop's early use is inside the temporal-dead-zone-safe region).
   const ARMED_ROW_TTL_MS = 60_000;
-  let lastRenderedPrice = null; // drives the tick flash
   let lastPriceAt = 0;
   // F-57: when the page's OWN feed last delivered an accepted tick. Kept apart
   // from lastPriceAt, which means "when token.priceNative was last written by
@@ -358,7 +357,7 @@
     try { closeFlexComposer(); flexEls = null; flexSource = null; flexModel = null; } catch (_) {}
     try { if (host && host.remove) host.remove(); } catch (_) {}
     host = null; shadow = null; els = {};
-    posEls = null; alertEls = null; lastRenderedPrice = null;
+    posEls = null; alertEls = null;
     // One quiet line, not a per-tick error storm.
     try { console.info('PaperTrench: extension context ended (' + (reason || 'reloaded') + '); overlay removed.'); } catch (_) {}
   }
@@ -1369,7 +1368,6 @@
     if (!token || token.mint !== prevMint) {
       // The cached card belongs to the previous token; force a rebuild.
       posEls = null;
-      lastRenderedPrice = null;
     }
     if (prevMint && (!token || token.mint !== prevMint)) {
       // Release the previous token's chain subscription immediately; a stale
@@ -7848,20 +7846,11 @@
       (mark.pnlUsd !== null ? ` · ${E.fmtUsd(mark.pnlUsd)}` : '');
     posEls.pnl.classList.toggle('pt-green', mark.up);
     posEls.pnl.classList.toggle('pt-red', !mark.up);
-
-    // Flash when the underlying price moves, but color by TOTAL position P&L,
-    // never by tick direction. A losing position stays red during a bounce;
-    // a profitable position stays green during a pullback.
-    if (lastRenderedPrice !== null && mark.price !== lastRenderedPrice) {
-      const cls = mark.up ? 'pt-flash-up' : 'pt-flash-down';
-      posEls.pnl.classList.remove('pt-flash-up', 'pt-flash-down');
-      // Force a reflow so the animation restarts on consecutive ticks.
-      void posEls.pnl.offsetWidth;
-      posEls.pnl.classList.add(cls);
-    }
+    // The number and its sign color update live; the position card itself
+    // stays still so a fast market feed cannot become a constant strobe.
+    posEls.pnl.classList.remove('pt-flash-up', 'pt-flash-down');
     renderPositionLedger(pos, mark);
     renderSellInitial();
-    lastRenderedPrice = mark.price;
   }
 
   /**
@@ -7968,7 +7957,6 @@
     }
     setSellLadderEnabled(false);
     if (posEls.orders) posEls.orders.classList.add('pt-hidden');
-    lastRenderedPrice = null;
   }
   function renderPositionLedger(pos, mark) {
     if (!posEls || !posEls.ledger) return;
@@ -9378,7 +9366,6 @@
     // overlay skip buildAlertsSection and then paint armed levels into a
     // detached node, leaving the live panel's alert list permanently empty.
     alertEls = null;
-    lastRenderedPrice = null;
   }
 
   /* -------------------- Turbo receipts: page jank sampling -------------------

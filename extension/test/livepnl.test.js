@@ -537,7 +537,7 @@ test('the rendered unrealized P&L changes as the live price moves', async () => 
     `engine mark (${marked}) must equal the live price (${latest}) the card rendered`);
 });
 
-test('a rising tick while the position is still down stays entirely red', async () => {
+test('a rising tick while the position is still down updates the red number without flashing the background', async () => {
   const ov = runOverlay([0.001, 0.0005, 0.0006]);
 
   await ov.advance(1200);
@@ -546,20 +546,22 @@ test('a rising tick while the position is still down stays entirely red', async 
 
   ov.nextPrice();
   await ov.advance(2500); // fall to 0.0005
+  const beforeBounce = ov.fieldText('pnl');
   ov.nextPrice();
   await ov.advance(2500); // bounce to 0.0006, still below entry
 
+  assert.notEqual(ov.fieldText('pnl'), beforeBounce, 'the P&L number must still update on a fresh tick');
   assert.match(ov.fieldText('pnl'), /^-/, 'total P&L must still be negative');
   const classes = ov.fieldClasses('pnl');
   assert.equal(classes.has('pt-red'), true, 'losing P&L text must be red');
   assert.equal(classes.has('pt-green'), false, 'losing P&L must never be green');
-  assert.equal(classes.has('pt-flash-down'), true,
-    'a bounce while still losing must use the red loss flash');
+  assert.equal(classes.has('pt-flash-down'), false,
+    'live loss updates must not flash a red background');
   assert.equal(classes.has('pt-flash-up'), false,
-    'tick direction must not create a green flash while total P&L is negative');
+    'live loss updates must not flash a green background either');
 });
 
-test('a falling tick while the position is still up stays entirely green', async () => {
+test('a falling tick while the position is still up updates the green number without flashing the background', async () => {
   const ov = runOverlay([0.001, 0.002, 0.0015]);
 
   await ov.advance(1200);
@@ -568,17 +570,19 @@ test('a falling tick while the position is still up stays entirely green', async
 
   ov.nextPrice();
   await ov.advance(2500); // rise to 0.002
+  const beforePullback = ov.fieldText('pnl');
   ov.nextPrice();
   await ov.advance(2500); // pull back to 0.0015, still above entry
 
+  assert.notEqual(ov.fieldText('pnl'), beforePullback, 'the P&L number must still update on a fresh tick');
   assert.match(ov.fieldText('pnl'), /^\+/, 'total P&L must still be positive');
   const classes = ov.fieldClasses('pnl');
   assert.equal(classes.has('pt-green'), true, 'profitable P&L text must be green');
   assert.equal(classes.has('pt-red'), false, 'profitable P&L must never be red');
-  assert.equal(classes.has('pt-flash-up'), true,
-    'a pullback while still profitable must use the green profit flash');
+  assert.equal(classes.has('pt-flash-up'), false,
+    'live profit updates must not flash a green background');
   assert.equal(classes.has('pt-flash-down'), false,
-    'tick direction must not create a red flash while total P&L is positive');
+    'live profit updates must not flash a red background either');
 });
 
 test('the quick-sell row never moves when the P&L wraps (gibsonandjustin)', () => {
