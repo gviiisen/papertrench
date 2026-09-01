@@ -5574,7 +5574,17 @@
     });
     // Positions bar controls.
     const barBrand = shadow.getElementById('pt-bar-brand');
-    if (barBrand) barBrand.addEventListener('click', openDashboard);
+    if (barBrand) barBrand.addEventListener('click', () => {
+      // When only the positions rail is left on screen, PAPER is the obvious
+      // recovery target. Restore the detailed trade panel first; while the
+      // panel is already open the same brand keeps its dashboard shortcut.
+      if (panelMinimized) {
+        panelMinimized = false;
+        setPanelVisible(true);
+        return;
+      }
+      openDashboard();
+    });
     if (els.gameHud) els.gameHud.addEventListener('click', openDashboard);
     const barHide = shadow.getElementById('pt-bar-hide');
     if (barHide) barHide.addEventListener('click', () => {
@@ -6225,6 +6235,10 @@
 
   function setPanelVisible(visible) {
     if (!els.box || !els.pill) return;
+    const barBrand = shadow && shadow.getElementById('pt-bar-brand');
+    if (barBrand) barBrand.title = panelMinimized
+      ? 'Restore detailed trade panel'
+      : 'Open PaperTrench dashboard';
     if (!visible) {
       els.box.classList.add('pt-hidden');
       els.pill.style.display = 'none';

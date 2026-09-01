@@ -84,6 +84,8 @@
     'Drag to move': '拖动面板',
     'Resize': '调整大小',
     'Open dashboard': '打开数据面板',
+    'Open PaperTrench dashboard': '打开 PaperTrench 数据面板',
+    'Restore detailed trade panel': '展开详细交易面板',
     'Minimize': '最小化',
     'Edit presets & fees right here': '编辑快捷金额和费用',
     'Edit presets and fees': '编辑快捷金额和费用',

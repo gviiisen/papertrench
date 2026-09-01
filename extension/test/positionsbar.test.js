@@ -249,6 +249,16 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 
+test('the PAPER brand restores a minimized detailed panel before opening the dashboard', () => {
+  const content = fs.readFileSync(path.join(ROOT, 'content.js'), 'utf8');
+  const start = content.indexOf("barBrand.addEventListener('click'");
+  const handler = content.slice(start, content.indexOf('if (els.gameHud)', start));
+  assert.match(handler, /if \(panelMinimized\)/);
+  assert.match(handler, /panelMinimized = false;/);
+  assert.match(handler, /setPanelVisible\(true\);/);
+  assert.match(handler, /openDashboard\(\);/);
+});
+
 /**
  * Boot the real content.js against a fake DOM and a stubbed batch endpoint,
  * then inspect the actual chips it produced. This drives the shipped file
