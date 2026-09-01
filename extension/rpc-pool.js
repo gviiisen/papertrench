@@ -34,7 +34,11 @@
    */
   const PUBLIC_ENDPOINTS = [
     { id: 'publicnode', http: 'https://solana-rpc.publicnode.com', ws: 'wss://solana-rpc.publicnode.com' },
-    { id: 'solana-labs', http: 'https://api.mainnet-beta.solana.com', ws: 'wss://api.mainnet-beta.solana.com' },
+    // Solana Labs' public endpoint still serves ordinary HTTP RPC, but its
+    // WebSocket handshake rejects extension clients with HTTP 403. Offering
+    // it to onchain-feed creates a Chrome extension error before failover can
+    // recover, so keep it for reads and leave streaming to WS-capable nodes.
+    { id: 'solana-labs', http: 'https://api.mainnet-beta.solana.com', ws: null },
     { id: 'tatum', http: 'https://solana-mainnet.gateway.tatum.io', ws: null },
   ];
 

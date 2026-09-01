@@ -190,6 +190,13 @@ test('only endpoints that actually support websockets are offered for streaming'
   }
 });
 
+test('the Solana Labs public HTTP RPC is not offered as an extension WebSocket', () => {
+  const P = loadPool(async () => okResponse('ok'));
+  const urls = P.websocketUrls().map((entry) => entry.url);
+  assert.equal(urls.includes('wss://api.mainnet-beta.solana.com'), false,
+    'that public endpoint rejects extension WebSocket handshakes with HTTP 403');
+});
+
 test('the feed walks the ranked websocket list instead of one hardcoded url', () => {
   const src = fs.readFileSync(path.join(ROOT, 'onchain-feed.js'), 'utf8');
   assert.match(src, /POOL\.websocketUrls\(\)/,
