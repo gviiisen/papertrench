@@ -256,3 +256,17 @@ test('a positions-bar chip returns to the RIGHT chain', () => {
   assert.match(S.tokenUrlFor(SOL_MINT, { siteId: 'gmgn' }), /gmgn\.ai\/sol\/token\//);
   assert.match(S.tokenUrlFor(SOL_MINT, { siteId: 'fomo' }), /fomo\.family\/tokens\/solana\//);
 });
+
+test('a Debot chip never sends an EVM contract to the Solana route', () => {
+  const S = sitesApi();
+  assert.equal(
+    S.tokenUrlFor(USDT_BSC, { siteId: 'debot' }),
+    `https://debot.ai/token/bsc/${USDT_BSC}`,
+    'legacy positions without a chain must infer Debot BSC from the unambiguous 0x address shape',
+  );
+  assert.equal(
+    S.tokenUrlFor(USDT_BSC, { siteId: 'debot', chain: 'bnb' }),
+    `https://debot.ai/token/bsc/${USDT_BSC}`,
+    'the engine\'s BNB ledger alias must map to Debot\'s bsc URL slug',
+  );
+});

@@ -12,6 +12,10 @@ Real prices. Fake money. A record you can actually learn from.
 
 </div>
 
+> **Fork 说明：** 本仓库基于 [OnlyTerp/papertrench](https://github.com/OnlyTerp/papertrench)
+> 进行二次开发，保留原项目的 MIT 许可证。当前版本主要增加了 Debot.ai 的 Solana/BSC
+> 模拟交易适配、中文界面与相关图表/行情兼容性修复。
+
 <div align="center">
 
 ### [▶ Watch the launch video](https://papertrench.com/assets/launch.mp4)

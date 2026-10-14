@@ -467,6 +467,18 @@ test('an unindexed coin never tears the chart down (the flashing bug)', async ()
     'the panel must show an honest waiting state while unindexed');
 });
 
+test('a Debot route with no detected token does not clear native marks every poll', async () => {
+  const ov = runFreshLaunch({
+    url: 'https://debot.ai/token/robinhood/266425_0x812486eaea648819853f8e372dc9f1516c7868bd',
+    resolved: () => false,
+  });
+
+  await ov.advance(6000);
+
+  assert.equal(ov.teardowns(), 0,
+    'an unchanged no-token state must leave Debot native chart marks untouched');
+});
+
 test('the overlay retries fast while a new coin is unindexed', async () => {
   const ov = runFreshLaunch({ resolved: () => false });
 
@@ -1175,5 +1187,4 @@ test('LIVE-MARKET: a failing prewatch re-probes immediately while mcap ticks pro
   const c2 = await at(2000);
   assert.ok(c2 > c1, `the live-market probe must keep re-firing; went ${c1}->${c2}`);
 });
-
 

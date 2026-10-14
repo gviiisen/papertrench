@@ -2705,17 +2705,13 @@
       const time = debotMarkerTime(state, payload);
       if (!time) continue;
       const sell = payload.side === 'sell';
-      const marker = {
+      out.push({
         time,
         position: sell ? 'aboveBar' : 'belowBar',
-        color: sell ? '#FF5F56' : '#FACC15',
-        shape: sell ? 'arrowDown' : 'circle',
+        color: sell ? '#FF5F56' : '#00D6A2',
+        shape: sell ? 'arrowDown' : 'arrowUp',
         text: payload.text || (sell ? 'PT Sell' : 'PT Buy'),
-      };
-      // Debot's chart is visually busy; a larger yellow buy bubble stays
-      // recognizable without changing the candle/time it is anchored to.
-      if (!sell) marker.size = 2;
-      out.push(marker);
+      });
     }
     return out;
   }
@@ -2733,10 +2729,7 @@
 
   function applyDebotMarkers(state) {
     if (!state || !state.series) return false;
-    const siteMarkers = state.siteMarkers.map((marker) => {
-      if (!marker || String(marker.text || '').trim().toUpperCase() !== 'B') return marker;
-      return { ...marker, color: '#FACC15', shape: 'circle', size: 2 };
-    });
+    const siteMarkers = state.siteMarkers;
     const merged = [...siteMarkers, ...debotPaperMarkers(state)]
       .sort((a, b) => (debotTimeSec(a.time) || 0) - (debotTimeSec(b.time) || 0));
     const signature = debotMarkerSignature(merged);

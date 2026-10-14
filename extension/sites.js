@@ -443,7 +443,7 @@
       id: 'debot',
       name: 'Debot',
       tokenUrl: (mint, pairAddress, chain) => 'https://debot.ai/token/'
-        + ((chain || 'solana') === 'bsc' ? 'bsc' : 'solana') + '/' + mint,
+        + (chain === 'bsc' || chain === 'bnb' ? 'bsc' : 'solana') + '/' + mint,
       match: (h) => /(^|\.)debot\.ai$/.test(h),
       // Debot's SPA emits both canonical token links and pool-qualified links:
       //   /token/bsc/0x…
@@ -504,7 +504,13 @@
     // MULTICHAIN: the position's chain rides along, because a chip that
     // returns to the wrong chain is a link to a different token. Absent a
     // chain the answer stays exactly what it has always been: Solana.
-    const chain = options.chain || 'solana';
+    // A legacy position may predate the chain field. An EVM address is
+    // unambiguously not Solana; Debot's supported EVM venue is BSC, so keep
+    // old 0x positions off the impossible /token/solana/0x... route. Other
+    // multichain terminals remain explicit because a 0x address alone cannot
+    // distinguish Ethereum, Base and BSC there.
+    const chain = options.chain
+      || (wanted === 'debot' && EVM_ADDRESS_RE.test(mint) ? 'bsc' : 'solana');
 
     let adapter = null;
     if (wanted) adapter = ADAPTERS.find((a) => a.id === wanted) || null;

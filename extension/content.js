@@ -1036,7 +1036,16 @@
     if (location.href === lastHref && settled) return;
     site = S.currentSite();
     const candidate = site.detect();
-    if (!candidate) { lastHref = location.href; swapStash = null; setToken(null); return; }
+    if (!candidate) {
+      lastHref = location.href;
+      swapStash = null;
+      // A no-token result is a state, not a recurring teardown command. On
+      // Debot's robinhood routes this branch runs every detection tick; calling
+      // setToken(null) while already null cleared and refreshed all 431 native
+      // TradingView marks roughly once per second.
+      if (token) setToken(null);
+      return;
+    }
     if (settled && (token.mint === candidate.address || token.pairAddress === candidate.address || token.srcAddress === candidate.address)) { lastHref = location.href; return; }
     // lastHref is only committed once this tick actually acts on the URL. If a
     // resolve is still in flight, leave it uncommitted so a navigation that
@@ -7670,6 +7679,7 @@
     const url = S.tokenUrlFor(mint, {
       siteId: (pos && pos.site) || (site && site.id),
       pairAddress: livePair || (pos && pos.pairAddress),
+      chain: pos && pos.chain,
       fallbackSite: site,
     });
     if (!url) return;
