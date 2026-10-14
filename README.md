@@ -17,6 +17,10 @@ Real prices. Fake money. A record you can actually learn from.
 > 模拟交易适配、中文界面与相关图表/行情兼容性修复。
 
 <div align="center">
+<img src="docs/assets/debot-papertrading-cn.png" alt="PaperTrench 在 Debot.ai 上的中文模拟交易界面" width="86%">
+</div>
+
+<div align="center">
 
 ### [▶ Watch the launch video](https://papertrench.com/assets/launch.mp4)
 
